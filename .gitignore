@@ -11,3 +11,6 @@ filecoin-project-*/
 # VIM
 *.swp
 .env
+
+# Local Netlify folder
+.netlify

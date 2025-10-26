@@ -1,0 +1,40 @@
+graph TB
+    subgraph "Application Layer"
+        App[Your Application]
+        SDK[Synapse SDK]
+    end
+
+    subgraph "Smart Contract Layer"
+        WS[Warm Storage<br/>Service]
+        FP[Filecoin Pay]
+        PDP[PDP Registry]
+    end
+
+    subgraph "Storage Layer"
+        SP1[Storage Provider 1]
+        SP2[Storage Provider 2]
+        SP3[Storage Provider N]
+    end
+
+    subgraph "Retrieval Layer"
+        Beam[Filecoin Beam CDN]
+    end
+
+    App --> SDK
+    SDK --> WS
+    SDK --> FP
+    SDK --> PDP
+    WS --> SP1
+    WS --> SP2
+    WS --> SP3
+    PDP --> SP1
+    PDP --> SP2
+    PDP --> SP3
+    Beam --> SP1
+    Beam --> SP2
+    Beam --> SP3
+    App -.Retrieve.-> Beam
+
+    style SDK fill:#2196f3,stroke:#1976d2,stroke-width:3px,color:#fff
+    style WS fill:#9c27b0,stroke:#7b1fa2,stroke-width:2px,color:#fff
+    style Beam fill:#ff9800,stroke:#f57c00,stroke-width:2px,color:#fff

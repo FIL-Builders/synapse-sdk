@@ -1,0 +1,312 @@
+---
+title: Glossary
+description: Key terms and definitions for the Filecoin On-Chain Cloud system.
+sidebar:
+  order: 7
+---
+
+This glossary defines key terms used throughout the Filecoin On-Chain Cloud documentation.
+
+## Core Concepts
+
+### Data Set
+
+A logical container of pieces managed by a storage provider for a client. Each data set:
+
+- Has a unique ID
+- Is managed by one storage provider
+- Contains one or more pieces
+- Has associated proof verification schedules
+- Is tracked on-chain by the PDPVerifier contract
+
+See: [PDP Overview](/core-concepts/pdp-overview)
+
+### Piece
+
+A unit of data stored in a data set. Each piece:
+
+- Has a unique PieceCID (content identifier)
+- Is typically 127 bytes to several GB
+- Has a Merkle tree representation for proofs
+- Is tracked on-chain with metadata
+- Can be downloaded independently
+
+### PieceCID
+
+Content Identifier for a piece. This is:
+
+- The Merkle root hash of the piece data
+- Used to verify piece integrity
+- How pieces are referenced for downloads
+- Immutable (same data = same CID)
+
+## Proof System
+
+### PDP (Proof of Data Possession)
+
+A cryptographic protocol that allows storage providers to prove they possess data without revealing the data itself. Key properties:
+
+- Uses Merkle tree proofs
+- Challenges are randomized and unpredictable
+- Verification happens on-chain
+- Efficient (small proofs for large data)
+
+See: [PDP Overview](/core-concepts/pdp-overview)
+
+### PDPVerifier Contract
+
+The smart contract that manages proof verification. Responsibilities:
+
+- Creates and manages data sets
+- Generates randomized challenges
+- Verifies Merkle proofs
+- Reports faults to listener contracts
+- Neutral layer (no business logic)
+
+See: [System Architecture](/core-concepts/architecture)
+
+### Challenge
+
+A randomized request for proof that a provider possesses specific data. Challenges:
+
+- Are generated using drand randomness
+- Cannot be predicted in advance
+- Specify which leaf to prove
+- Have a time window for response
+- Trigger faults if not answered
+
+### Merkle Proof
+
+A cryptographic proof that a specific piece of data exists in a Merkle tree. Contains:
+
+- The leaf data being proven
+- Sibling hashes along the path to root
+- Path indices (left/right decisions)
+- Compact size (O(log n) where n = leaf count)
+
+### Proving Period
+
+The time interval between required proofs for a data set. Measured in:
+
+- Filecoin epochs (30 seconds each)
+- Configured per data set
+- Typically ranges from hours to days
+- Determines proof frequency
+
+## Payment System
+
+### FilecoinPay V1
+
+The smart contract system for automated payments. Provides:
+
+- Payment rails (automated channels)
+- Lockup mechanism (provider protection)
+- Operator approvals
+- Settlement functions
+- ERC-20 token support
+
+See: [FilecoinPay Technical Overview](/core-concepts/filecoin-pay-overview)
+
+### Payment Rail
+
+An automated payment channel from payer to payee. Characteristics:
+
+- One-to-one relationship (specific payer → specific payee)
+- Has a payment rate (tokens per epoch)
+- Has a lockup period (guarantee window)
+- Managed by an operator contract
+- Can have optional validator
+
+### Lockup
+
+Funds reserved to guarantee provider payment. Two types:
+
+- **Streaming lockup**: `paymentRate × lockupPeriod`
+- **Fixed lockup**: One-time payment pool
+
+Purpose:
+
+- Ensures providers get paid even if client abandons account
+- Acts as minimum balance requirement
+- Activated after rail termination (safety hatch)
+
+### Epoch
+
+A unit of time in the Filecoin network, approximately 30 seconds. Used for:
+
+- Payment rate calculations (e.g., 3 USDFC per epoch)
+- Proof challenge timing
+- Lockup period specifications
+- Settlement calculations
+
+### Operator
+
+A trusted smart contract that manages payment rails on behalf of payers. Examples:
+
+- FilecoinWarmStorageService contract
+- Future: Compute service contracts
+
+Capabilities:
+
+- Create payment rails
+- Modify rail terms
+- Settle payments
+- Terminate rails
+
+Constraints:
+
+- Must be approved by payer
+- Subject to allowance limits
+
+### Validator
+
+An optional arbitrator contract that can mediate payments. Capabilities:
+
+- Adjust settlement amounts
+- Veto rail terminations
+- Apply penalties for poor service quality
+- Enforce custom SLAs
+
+Currently not used in WarmStorage, but available for future implementations.
+
+## Service Layer
+
+### WarmStorage / FilecoinWarmStorageService
+
+The business logic contract for the storage marketplace. Responsibilities:
+
+- Client authentication via EIP-712 signatures
+- Payment rail creation and management
+- Metadata storage
+- Integration with PDP and FilecoinPay
+- Pricing calculations
+
+See: [Warm Storage Overview](/core-concepts/fwss-overview)
+
+### PDPListener
+
+An interface that storage services implement to receive callbacks from PDPVerifier. Callbacks:
+
+- `dataSetCreated` - New data set initialized
+- `piecesAdded` - Pieces added to data set
+- `possessionProven` - Successful proof submitted
+- `nextProvingPeriod` - Proof failed or period advanced
+
+Enables custom business logic in response to proof events.
+
+### Record Keeper
+
+The contract address that receives PDPListener callbacks for a data set. Typically:
+
+- The WarmStorage contract address
+- Set when creating the data set
+- Cannot be changed after creation
+- Receives all lifecycle events
+
+## SDK Components
+
+:::note
+These are **SDK components** (TypeScript classes), not smart contracts.
+:::
+
+### Synapse
+
+The main SDK entry point. Provides:
+
+- Factory pattern initialization (`Synapse.create()`)
+- Network detection
+- Component orchestration
+- High-level API (`synapse.storage.upload()`)
+
+### PaymentsService
+
+SDK client for the FilecoinPay V1 contract. Handles:
+
+- USDFC deposits and withdrawals
+- Service operator approvals
+- Payment rail queries
+- Account balance management
+
+### StorageManager
+
+High-level SDK component for storage operations. Features:
+
+- Auto provider selection
+- Simple upload/download API
+- Context caching
+- Provider-agnostic downloads
+
+### StorageContext
+
+SDK component representing a connection to a specific provider. Manages:
+
+- Provider-specific operations
+- Data set lifecycle
+- Upload/download to one provider
+- Piece status queries
+
+## Filecoin Network
+
+### Drand
+
+A distributed randomness beacon used for unpredictable challenge generation. Properties:
+
+- Publicly verifiable randomness
+- Cannot be predicted or manipulated
+- Used by Filecoin network
+- Accessed via beacon contract on-chain
+
+### Curio
+
+The storage provider software that manages:
+
+- Data storage
+- Proof generation and submission
+- API endpoints for clients
+- Integration with blockchain
+
+### EIP-712
+
+Ethereum standard for typed structured data signing. Used for:
+
+- Client authentication in WarmStorage
+- CreateDataSet operations
+- AddPieces operations
+- Secure, user-friendly signatures
+
+## Tokens
+
+### USDFC
+
+USD-pegged stablecoin used for payments in the system. Properties:
+
+- ERC-20 token
+- 18 decimal places
+- Used for deposits, payments, lockups
+- Supported by FilecoinPay V1
+
+### FIL
+
+Native Filecoin token. Notes:
+
+- Can be used for gas fees
+- Not currently used for storage payments (USDFC is used)
+- Network native token
+
+## Common Abbreviations
+
+| Term | Full Name                         | Description                        |
+| ---- | --------------------------------- | ---------------------------------- |
+| PDP  | Proof of Data Possession          | Cryptographic proof protocol       |
+| CID  | Content Identifier                | Unique hash identifying data       |
+| SDK  | Software Development Kit          | TypeScript client library          |
+| EIP  | Ethereum Improvement Proposal     | Ethereum standard specification    |
+| SLA  | Service Level Agreement           | Quality of service guarantees      |
+| API  | Application Programming Interface | Interface for software interaction |
+
+## Related Documentation
+
+- [System Architecture](/core-concepts/architecture) - How all components work together
+- [PDP Overview](/core-concepts/pdp-overview) - Proof verification deep dive
+- [FilecoinPay Technical Overview](/core-concepts/filecoin-pay-overview) - Payment system details
+- [Synapse SDK](/synapse-sdk/about) - SDK component architecture

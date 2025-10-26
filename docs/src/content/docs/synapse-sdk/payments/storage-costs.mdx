@@ -1,0 +1,522 @@
+---
+title: How to Calculate Storage Costs
+description: Calculate storage costs and fund your account for future storage needs
+sidebar:
+  order: 1
+---
+
+This guide shows you how to calculate storage costs, determine how much to deposit, and fund your account to maintain sufficient balance. You'll learn to answer questions like "How much will it cost to store 200MiB for 1 year?" and "How much should I deposit to stay funded for 1 year?"
+
+## Prerequisites
+
+**Synapse SDK installed:**
+
+```bash
+npm install @filoz/synapse-sdk ethers
+```
+
+**Environment setup:**
+
+```bash
+PRIVATE_KEY=your_wallet_private_key
+RPC_URL=https://api.calibration.node.glif.io/rpc/v1
+```
+
+**USDFC tokens:** Must have USDFC in your wallet before depositing.
+
+**Operator approved:** This guide assumes WarmStorage is already approved as your operator with sufficient allowances. For first-time setup, see the [Payment Overview](/synapse-sdk/payments/).
+
+## Understanding Storage Costs
+
+Storage on Filecoin On-Chain Cloud uses a **pay-per-epoch** model:
+
+**Lockup Rate**: The amount charged per epoch (30 seconds) for your storage. This is your "burn rate."
+
+**Available Funds**: Your deposited balance that pays for storage over time. Decreases by the lockup rate every epoch.
+
+**Funding Duration**: How long your available funds will last at your current lockup rate.
+
+**Key insight:** When you add new storage, your lockup rate increases. To maintain the same funding duration, you need to deposit enough to cover the combined lockup rate (current + new) for your target duration.
+
+## Step-by-Step: Calculate Costs and Deposit for 1 Year
+
+This complete example shows you exactly how to:
+
+1. Check your current costs and funding status
+2. Calculate the cost to store an additional 200MiB for 1 year
+3. Calculate the total deposit needed to fund everything for 1 year
+4. Execute the deposit
+5. Verify your new funding duration
+
+### Step 1: Check Your Current State
+
+First, understand your current situation - how much you're spending now and how long you're funded:
+
+```typescript
+import { Synapse, getCurrentEpoch, TIME_CONSTANTS } from "@filoz/synapse-sdk";
+import { ethers } from "ethers";
+
+async function step1_checkCurrentState() {
+  const synapse = await Synapse.create({
+    privateKey: process.env.PRIVATE_KEY,
+    rpcURL: process.env.RPC_URL,
+  });
+
+  // Get current account info
+  const info = await synapse.payments.accountInfo();
+  const currentEpoch = await getCurrentEpoch(synapse.provider);
+
+  console.log("=== CURRENT STATE ===");
+  console.log(
+    "Available funds:",
+    ethers.formatUnits(info.availableFunds, 18),
+    "USDFC"
+  );
+  console.log(
+    "Current lockup rate:",
+    ethers.formatUnits(info.lockupRate, 18),
+    "USDFC/epoch"
+  );
+
+  // Calculate current monthly cost
+  const epochsPerMonth = TIME_CONSTANTS.EPOCHS_PER_DAY * 30n;
+  const currentMonthlyCost = info.lockupRate * epochsPerMonth;
+  console.log(
+    "Current monthly cost:",
+    ethers.formatUnits(currentMonthlyCost, 18),
+    "USDFC"
+  );
+
+  // Calculate current funding duration
+  if (info.lockupRate > 0n) {
+    const epochsRemaining = info.availableFunds / info.lockupRate;
+    const daysRemaining =
+      Number(epochsRemaining) / Number(TIME_CONSTANTS.EPOCHS_PER_DAY);
+    const fundedUntilEpoch = currentEpoch + epochsRemaining;
+
+    console.log("Days of funding remaining:", daysRemaining.toFixed(1));
+    console.log("Funded until epoch:", fundedUntilEpoch.toString());
+  } else {
+    console.log("No active storage (lockup rate is 0)");
+  }
+
+  return { synapse, info, currentEpoch };
+}
+
+// Run step 1
+const { synapse, info, currentEpoch } = await step1_checkCurrentState();
+```
+
+**What's happening:**
+
+- `accountInfo()` gives you your available funds and current lockup rate
+- The lockup rate is how much you spend per epoch (every 30 seconds)
+- Monthly cost = lockup rate × epochs per month
+- Funding duration = available funds ÷ lockup rate
+
+**Example output:**
+
+```
+=== CURRENT STATE ===
+Available funds: 10.5 USDFC
+Current lockup rate: 0.000001157 USDFC/epoch
+Current monthly cost: 0.1 USDFC
+Days of funding remaining: 105.0
+Funded until epoch: 302400
+```
+
+### Step 2: Calculate Cost for 200MiB for 1 Year
+
+Use `preflightUpload()` to get the cost estimate for your new storage:
+
+```typescript
+async function step2_calculateNewStorageCost(synapse) {
+  const storageContext = await synapse.storage.createContext();
+
+  // Define new storage requirements
+  const fileSizeBytes = 200 * 1024 * 1024; // 200 MiB
+  const epochsPerYear = TIME_CONSTANTS.EPOCHS_PER_DAY * 365n;
+
+  // Get cost estimate (preflight doesn't actually upload, just estimates)
+  const preflight = await storageContext.preflightUpload(fileSizeBytes);
+
+  console.log("\n=== NEW FILE COSTS (200MiB) ===");
+  console.log(
+    "Cost per epoch:",
+    ethers.formatUnits(preflight.estimatedCost.perEpoch, 18),
+    "USDFC"
+  );
+  console.log(
+    "Cost per day:",
+    ethers.formatUnits(preflight.estimatedCost.perDay, 18),
+    "USDFC"
+  );
+  console.log(
+    "Cost per month:",
+    ethers.formatUnits(preflight.estimatedCost.perMonth, 18),
+    "USDFC"
+  );
+
+  // Calculate cost for 1 year
+  const oneYearCost = preflight.estimatedCost.perEpoch * epochsPerYear;
+  console.log("Cost for 1 year:", ethers.formatUnits(oneYearCost, 18), "USDFC");
+
+  return { preflight, oneYearCost, epochsPerYear };
+}
+
+// Run step 2
+const { preflight, oneYearCost, epochsPerYear } =
+  await step2_calculateNewStorageCost(synapse);
+```
+
+**What's happening:**
+
+- `preflightUpload()` asks the storage provider "how much would this cost?" without actually uploading
+- It returns costs broken down by epoch, day, and month
+- For 1 year: multiply the per-epoch cost by epochs per year (2,880 × 365 = 1,051,200 epochs)
+
+**Example output:**
+
+```
+=== NEW FILE COSTS (200MiB) ===
+Cost per epoch: 0.000000347 USDFC
+Cost per day: 0.001 USDFC
+Cost per month: 0.03 USDFC
+Cost for 1 year: 0.365 USDFC
+```
+
+### Step 3: Calculate Total Deposit Needed
+
+Now calculate how much to deposit to fund BOTH your current storage AND the new 200MiB for 1 full year:
+
+```typescript
+async function step3_calculateTotalDeposit(
+  synapse,
+  info,
+  preflight,
+  epochsPerYear
+) {
+  console.log("\n=== DEPOSIT CALCULATION ===");
+
+  // CRITICAL: Calculate COMBINED lockup rate (current + new)
+  const newFileLockupRate = preflight.estimatedCost.perEpoch;
+  const combinedLockupRate = info.lockupRate + newFileLockupRate;
+
+  console.log(
+    "Current lockup rate:",
+    ethers.formatUnits(info.lockupRate, 18),
+    "USDFC/epoch"
+  );
+  console.log(
+    "New file lockup rate:",
+    ethers.formatUnits(newFileLockupRate, 18),
+    "USDFC/epoch"
+  );
+  console.log(
+    "Combined lockup rate:",
+    ethers.formatUnits(combinedLockupRate, 18),
+    "USDFC/epoch"
+  );
+
+  // Calculate funds needed for 1 YEAR of COMBINED storage
+  const fundsNeededFor1Year = combinedLockupRate * epochsPerYear;
+  console.log(
+    "\nFunds needed for 1 year:",
+    ethers.formatUnits(fundsNeededFor1Year, 18),
+    "USDFC"
+  );
+  console.log(
+    "Current available funds:",
+    ethers.formatUnits(info.availableFunds, 18),
+    "USDFC"
+  );
+
+  // Calculate deposit amount
+  const depositNeeded = fundsNeededFor1Year - info.availableFunds;
+
+  if (depositNeeded <= 0n) {
+    console.log("\n✅ You already have enough funds for 1 year!");
+    return { depositNeeded: 0n, combinedLockupRate };
+  }
+
+  console.log(
+    "\nDeposit needed:",
+    ethers.formatUnits(depositNeeded, 18),
+    "USDFC"
+  );
+
+  return { depositNeeded, combinedLockupRate, fundsNeededFor1Year };
+}
+
+// Run step 3
+const { depositNeeded, combinedLockupRate, fundsNeededFor1Year } =
+  await step3_calculateTotalDeposit(synapse, info, preflight, epochsPerYear);
+```
+
+**What's happening:**
+
+- Your new total lockup rate = current rate + new file rate
+- To stay funded for 1 year, you need: combined rate × 1,051,200 epochs
+- Deposit amount = what you need - what you have
+
+**Critical math:**
+
+```
+Current storage: 0.000001157 USDFC/epoch
+New 200MiB:     +0.000000347 USDFC/epoch
+────────────────────────────────────────
+Combined rate:   0.000001504 USDFC/epoch
+
+For 1 year: 0.000001504 × 1,051,200 = 1.58 USDFC needed
+Currently have: 10.5 USDFC
+────────────────────────────────────────
+Deposit needed: 0 USDFC (already funded!)
+```
+
+**Example output:**
+
+```
+=== DEPOSIT CALCULATION ===
+Current lockup rate: 0.000001157 USDFC/epoch
+New file lockup rate: 0.000000347 USDFC/epoch
+Combined lockup rate: 0.000001504 USDFC/epoch
+
+Funds needed for 1 year: 1.58 USDFC
+Current available funds: 10.5 USDFC
+
+✅ You already have enough funds for 1 year!
+```
+
+### Step 4: Execute Deposit with Permit
+
+If you need to deposit, use the gas-efficient permit method:
+
+```typescript
+import { TOKENS } from "@filoz/synapse-sdk";
+
+async function step4_executeDeposit(synapse, depositNeeded) {
+  // Skip if no deposit needed
+  if (depositNeeded <= 0n) {
+    console.log("\n=== DEPOSIT ===");
+    console.log("No deposit needed - skipping");
+    return null;
+  }
+
+  console.log("\n=== EXECUTING DEPOSIT ===");
+
+  // Check wallet balance first
+  const walletBalance = await synapse.payments.walletBalance(TOKENS.USDFC);
+  console.log(
+    "Wallet balance:",
+    ethers.formatUnits(walletBalance, 18),
+    "USDFC"
+  );
+  console.log(
+    "Deposit amount:",
+    ethers.formatUnits(depositNeeded, 18),
+    "USDFC"
+  );
+
+  if (walletBalance < depositNeeded) {
+    throw new Error(
+      `Insufficient wallet balance. Need ${ethers.formatUnits(depositNeeded, 18)} USDFC, have ${ethers.formatUnits(walletBalance, 18)} USDFC`
+    );
+  }
+
+  // Execute deposit with permit (one transaction, gas-efficient)
+  console.log("\nSending deposit transaction...");
+  const tx = await synapse.payments.depositWithPermit(
+    depositNeeded,
+    TOKENS.USDFC
+  );
+  console.log("Transaction hash:", tx.hash);
+  console.log("Waiting for confirmation...");
+
+  const receipt = await tx.wait();
+  console.log("✅ Deposit confirmed in block:", receipt.blockNumber);
+
+  return receipt;
+}
+
+// Run step 4 (only if needed)
+const receipt = await step4_executeDeposit(synapse, depositNeeded);
+```
+
+**What's happening:**
+
+- Check wallet has enough USDFC before depositing
+- `depositWithPermit()` uses EIP-2612 to approve and deposit in one transaction
+- Wait for the transaction to be mined and confirmed
+
+**Why depositWithPermit?**
+
+- Single transaction (vs. two with separate approve)
+- Saves gas fees
+- Better user experience
+- No separate approval signature needed
+
+**Example output:**
+
+```
+=== EXECUTING DEPOSIT ===
+Wallet balance: 50.0 USDFC
+Deposit amount: 5.5 USDFC
+
+Sending deposit transaction...
+Transaction hash: 0x1234...5678
+Waiting for confirmation...
+✅ Deposit confirmed in block: 12345
+```
+
+### Step 5: Verify Your New Funding Duration
+
+Finally, verify that your deposit succeeded and check your new funding duration:
+
+```typescript
+async function step5_verifyDeposit(synapse) {
+  console.log("\n=== VERIFICATION ===");
+
+  // Get updated account info
+  const newInfo = await synapse.payments.accountInfo();
+  const currentEpoch = await getCurrentEpoch(synapse.provider);
+
+  console.log(
+    "New available funds:",
+    ethers.formatUnits(newInfo.availableFunds, 18),
+    "USDFC"
+  );
+  console.log(
+    "New lockup rate:",
+    ethers.formatUnits(newInfo.lockupRate, 18),
+    "USDFC/epoch"
+  );
+
+  // Calculate new funding duration
+  if (newInfo.lockupRate > 0n) {
+    const epochsRemaining = newInfo.availableFunds / newInfo.lockupRate;
+    const daysRemaining =
+      Number(epochsRemaining) / Number(TIME_CONSTANTS.EPOCHS_PER_DAY);
+    const yearsRemaining = daysRemaining / 365;
+    const fundedUntilEpoch = currentEpoch + epochsRemaining;
+
+    console.log("\n✅ Account Status:");
+    console.log("Funded for:", daysRemaining.toFixed(1), "days");
+    console.log("Funded for:", yearsRemaining.toFixed(2), "years");
+    console.log("Funded until epoch:", fundedUntilEpoch.toString());
+  } else {
+    console.log("\nNo active storage (lockup rate is 0)");
+  }
+}
+
+// Run step 5
+await step5_verifyDeposit(synapse);
+```
+
+**What's happening:**
+
+- Get fresh account info to see the new balance
+- Calculate how long you're now funded for
+- Confirm it matches your target (should be ~1 year after upload)
+
+**Example output:**
+
+```
+=== VERIFICATION ===
+New available funds: 15.5 USDFC
+New lockup rate: 0.000001157 USDFC/epoch
+
+✅ Account Status:
+Funded for: 365.0 days
+Funded for: 1.00 years
+Funded until epoch: 1353600
+```
+
+
+
+## Understanding the Key Values
+
+### How the Math Works
+
+```
+Example Scenario:
+├─ Current storage lockup rate: 100 USDFC/epoch
+├─ New 200MiB lockup rate:      +50 USDFC/epoch
+└─ Combined lockup rate:         150 USDFC/epoch
+
+Target: 1 year of funding
+├─ 1 year = 365 days × 2,880 epochs/day = 1,051,200 epochs
+├─ Funds needed = 150 USDFC/epoch × 1,051,200 epochs
+└─ Funds needed = 157,680,000 USDFC
+
+Current State:
+├─ Available funds: 100,000,000 USDFC
+└─ Deposit needed: 57,680,000 USDFC
+
+After Deposit:
+├─ New available: 157,680,000 USDFC
+├─ Lockup rate: 150 USDFC/epoch (after upload)
+└─ Funded for: 157,680,000 ÷ 150 = 1,051,200 epochs = 1 year ✓
+```
+
+### Key Formula Reference
+
+| Calculation      | Formula                                          | Example                         |
+| ---------------- | ------------------------------------------------ | ------------------------------- |
+| Epochs per day   | Fixed constant                                   | 2,880 epochs                    |
+| Epochs per year  | `EPOCHS_PER_DAY × 365`                           | 1,051,200 epochs                |
+| Monthly cost     | `lockupRate × EPOCHS_PER_DAY × 30`               | 100 × 2,880 × 30                |
+| Funding duration | `availableFunds ÷ lockupRate`                    | 1,000,000 ÷ 100 = 10,000 epochs |
+| Days of funding  | `epochsRemaining ÷ EPOCHS_PER_DAY`               | 10,000 ÷ 2,880 = 3.47 days      |
+| Combined rate    | `currentRate + newRate`                          | 100 + 50 = 150                  |
+| Deposit needed   | `(combinedRate × targetEpochs) - availableFunds` | (150 × 1,051,200) - 100,000,000 |
+
+## Best Practices
+
+**When to calculate and deposit:**
+
+- Before uploading new files
+- When funding duration drops below 90 days
+- Before planning significant storage expansion
+- When monthly costs increase unexpectedly
+
+**How much to deposit:**
+
+1. Calculate combined lockup rate (current + new)
+2. Choose target duration (e.g., 1 year = 1,051,200 epochs)
+3. Calculate: `combinedRate × targetEpochs - availableFunds`
+4. Add 5-10% buffer for safety
+
+**Operator allowances:**
+Remember to check that your operator has sufficient allowances for the new storage. If uploads fail due to allowance limits, see [Payment Overview](/synapse-sdk/payments/) for increasing allowances.
+
+**Cost optimization:**
+
+- Larger files have better cost efficiency
+- Longer storage durations get better rates
+- Monitor provider pricing for changes
+- Consider batching uploads to reduce rail creation overhead
+
+## Summary
+
+**To calculate costs and deposit for 1 year:**
+
+1. Check current state: `accountInfo()` gives you current lockup rate and available funds
+2. Calculate new cost: `preflightUpload(sizeBytes)` estimates cost for new storage
+3. Calculate deposit: `(currentRate + newRate) × epochs - availableFunds`
+4. Execute deposit: `depositWithPermit(depositAmount, TOKENS.USDFC)`
+5. Verify: Check new funding duration matches target
+
+**Key concepts:**
+
+- Combined lockup rate = current + new (both must be funded)
+- 1 year = 1,051,200 epochs (365 days × 2,880 epochs/day)
+- Deposit = what you need - what you have
+
+**Essential methods:**
+
+- `synapse.payments.accountInfo()` - Current state
+- `storageContext.preflightUpload(size)` - Cost estimate
+- `synapse.payments.depositWithPermit(amount, TOKENS.USDFC)` - Gas-efficient deposit
+- `getCurrentEpoch(provider)` - Current blockchain epoch
+
+Ready to set up monitoring and alerts? See [How to Monitor Your Storage Usage](/synapse-sdk/payments/storage-monitoring/)!

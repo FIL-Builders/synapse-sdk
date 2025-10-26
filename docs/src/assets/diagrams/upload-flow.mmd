@@ -1,0 +1,17 @@
+graph TD
+    A[Start: Have file to upload] --> B{Have testnet FIL?}
+    B -->|No| C[Get from faucet<br/>faucet.calibration.fildev.network]
+    B -->|Yes| D[Initialize Synapse SDK]
+    C --> D
+    D --> E[Call storage.upload]
+    E --> F[SDK calculates cost]
+    F --> G{Sufficient balance?}
+    G -->|No| H[Error: Insufficient funds]
+    G -->|Yes| I[Upload file chunks]
+    I --> J[Generate PDP proofs]
+    J --> K[Submit onchain transaction]
+    K --> L[Return storageId + CID]
+
+    style C fill:#ffc107,stroke:#ff9800,stroke-width:3px
+    style L fill:#4caf50,stroke:#388e3c,stroke-width:2px
+    style H fill:#f44336,stroke:#c62828,stroke-width:2px

@@ -1,0 +1,365 @@
+---
+title: How to Monitor Your Storage Usage
+description: Track payment health, set up alerts, and automate top-ups
+sidebar:
+  order: 2
+---
+
+This guide shows you how to track payment health, set up alert thresholds, and implement automated top-ups using the Synapse SDK. Learn to maintain target funding duration and avoid service interruptions.
+
+## Prerequisites
+
+**Synapse SDK installed:**
+
+```bash
+npm install @filoz/synapse-sdk ethers
+```
+
+**Active storage account:**
+
+- USDFC deposited in Payments contract
+- WarmStorage operator approved
+- Active payment rails (from uploads)
+
+**Environment setup:**
+
+```bash
+PRIVATE_KEY=your_wallet_private_key
+RPC_URL=https://api.calibration.node.glif.io/rpc/v1
+```
+
+## Important SDK Limitation
+
+:::caution[fundedUntilEpoch Not Available]
+The SDK's `accountInfo()` method does not return `fundedUntilEpoch`, which would tell you exactly when your account runs out of funds. The underlying smart contract has this information, but it's not exposed in the SDK yet.
+
+**Workaround:** Calculate approximate funding duration using `availableFunds / lockupRate`. This provides a reasonable estimate for monitoring purposes but doesn't account for unsettled epochs or future rate changes.
+:::
+
+## Why Monitor?
+
+Regular monitoring helps you:
+
+- **Avoid service interruption**: Top up before funds run out
+- **Budget effectively**: Understand daily/monthly storage costs
+- **Catch issues early**: Detect unexpected cost increases
+- **Plan capacity**: Know when to add more funds
+- **Automate operations**: Set up self-healing systems
+
+## Key Metrics to Track
+
+### 1. Available Funds
+
+The most critical metric - funds available for payment rails:
+
+```typescript
+import { Synapse } from "@filoz/synapse-sdk";
+import { ethers } from "ethers";
+
+const synapse = await Synapse.create({
+  privateKey: process.env.PRIVATE_KEY,
+  rpcURL: process.env.RPC_URL,
+});
+
+const info = await synapse.payments.accountInfo();
+
+console.log(
+  "Available funds:",
+  ethers.formatUnits(info.availableFunds, 18),
+  "USDFC"
+);
+console.log(
+  "Locked in rails:",
+  ethers.formatUnits(info.lockupCurrent, 18),
+  "USDFC"
+);
+console.log("Total balance:", ethers.formatUnits(info.funds, 18), "USDFC");
+```
+
+### 2. Lockup Rate (Burn Rate)
+
+How fast you're spending:
+
+```typescript
+import { TIME_CONSTANTS } from "@filoz/synapse-sdk";
+
+const info = await synapse.payments.accountInfo();
+
+const perEpoch = info.lockupRate;
+const perDay = perEpoch * TIME_CONSTANTS.EPOCHS_PER_DAY;
+const perMonth = perDay * 30n;
+
+console.log("Burn Rate:");
+console.log("  Per epoch:", ethers.formatUnits(perEpoch, 18), "USDFC");
+console.log("  Per day:", ethers.formatUnits(perDay, 18), "USDFC");
+console.log("  Per month:", ethers.formatUnits(perMonth, 18), "USDFC");
+```
+
+### 3. Estimated Funding Duration
+
+Calculate approximate runway:
+
+```typescript
+import { getCurrentEpoch, TIME_CONSTANTS } from "@filoz/synapse-sdk";
+
+async function calculateFundingRunway(synapse) {
+  const info = await synapse.payments.accountInfo();
+  const currentEpoch = await getCurrentEpoch(synapse.provider);
+
+  // No active rails
+  if (info.lockupRate === 0n) {
+    return {
+      hasActiveRails: false,
+      message: "No active payment rails - no ongoing costs",
+    };
+  }
+
+  // Calculate epochs of runway
+  const epochsRemaining = info.availableFunds / info.lockupRate;
+  const daysRemaining =
+    Number(epochsRemaining) / Number(TIME_CONSTANTS.EPOCHS_PER_DAY);
+  const fundedUntilEpoch = currentEpoch + epochsRemaining;
+
+  return {
+    hasActiveRails: true,
+    currentEpoch,
+    epochsRemaining,
+    daysRemaining,
+    fundedUntilEpoch,
+    dailyBurnRate: ethers.formatUnits(
+      info.lockupRate * TIME_CONSTANTS.EPOCHS_PER_DAY,
+      18
+    ),
+  };
+}
+
+// Usage
+const runway = await calculateFundingRunway(synapse);
+
+if (runway.hasActiveRails) {
+  console.log("Runway:", runway.daysRemaining.toFixed(1), "days");
+  console.log("Funded until epoch:", runway.fundedUntilEpoch.toString());
+  console.log("Daily burn:", runway.dailyBurnRate, "USDFC/day");
+} else {
+  console.log(runway.message);
+}
+```
+
+## Setting Up Alert Thresholds
+
+Define warning levels based on funding duration:
+
+```typescript
+import { Synapse, getCurrentEpoch, TIME_CONSTANTS } from "@filoz/synapse-sdk";
+import { ethers } from "ethers";
+
+enum AlertLevel {
+  CRITICAL = "CRITICAL", // < 30 days
+  WARNING = "WARNING", // < 90 days
+  LOW = "LOW", // < 180 days
+  HEALTHY = "HEALTHY", // >= 180 days
+}
+
+interface FundingHealth {
+  alertLevel: AlertLevel;
+  daysRemaining: number;
+  message: string;
+  epochsRemaining: bigint;
+  fundedUntilEpoch: bigint;
+}
+
+async function checkFundingHealth(synapse): Promise<FundingHealth> {
+  const info = await synapse.payments.accountInfo();
+  const currentEpoch = await getCurrentEpoch(synapse.provider);
+
+  // No active rails
+  if (info.lockupRate === 0n) {
+    return {
+      alertLevel: AlertLevel.HEALTHY,
+      daysRemaining: Infinity,
+      message: "✅ No active payment rails (no ongoing costs)",
+      epochsRemaining: 0n,
+      fundedUntilEpoch: 0n,
+    };
+  }
+
+  const epochsRemaining = info.availableFunds / info.lockupRate;
+  const daysRemaining =
+    Number(epochsRemaining) / Number(TIME_CONSTANTS.EPOCHS_PER_DAY);
+  const fundedUntilEpoch = currentEpoch + epochsRemaining;
+
+  let alertLevel: AlertLevel;
+  let message: string;
+
+  if (daysRemaining < 30) {
+    alertLevel = AlertLevel.CRITICAL;
+    message = `🚨 CRITICAL: Only ${daysRemaining.toFixed(1)} days of funding remaining!`;
+  } else if (daysRemaining < 90) {
+    alertLevel = AlertLevel.WARNING;
+    message = `⚠️  WARNING: ${daysRemaining.toFixed(1)} days of funding remaining`;
+  } else if (daysRemaining < 180) {
+    alertLevel = AlertLevel.LOW;
+    message = `💡 LOW: ${daysRemaining.toFixed(1)} days of funding remaining`;
+  } else {
+    alertLevel = AlertLevel.HEALTHY;
+    message = `✅ HEALTHY: ${daysRemaining.toFixed(1)} days of funding remaining`;
+  }
+
+  return {
+    alertLevel,
+    daysRemaining,
+    message,
+    epochsRemaining,
+    fundedUntilEpoch,
+  };
+}
+
+// Usage
+const health = await checkFundingHealth(synapse);
+console.log(health.message);
+console.log("Alert level:", health.alertLevel);
+```
+
+## Automated Top-Up
+
+Automatically maintain a target funding duration:
+
+```typescript
+import {
+  Synapse,
+  TOKENS,
+  TIME_CONSTANTS,
+  getCurrentEpoch,
+} from "@filoz/synapse-sdk";
+import { ethers } from "ethers";
+
+interface AutoTopUpConfig {
+  targetFundingYears: number; // Target duration (e.g., 1)
+  minFundingDays: number; // Trigger when below this (e.g., 180)
+}
+
+async function autoTopUp(synapse, config: AutoTopUpConfig): Promise<boolean> {
+  const info = await synapse.payments.accountInfo();
+
+  // Check if top-up needed
+  if (info.lockupRate === 0n) {
+    console.log("✅ No active payment rails - no top-up needed");
+    return false;
+  }
+
+  const epochsRemaining = info.availableFunds / info.lockupRate;
+  const daysRemaining =
+    Number(epochsRemaining) / Number(TIME_CONSTANTS.EPOCHS_PER_DAY);
+
+  console.log(`Current funding: ${daysRemaining.toFixed(1)} days`);
+
+  if (daysRemaining >= config.minFundingDays) {
+    console.log(
+      `✅ No top-up needed (above ${config.minFundingDays} day threshold)`
+    );
+    return false;
+  }
+
+  // Calculate deposit to restore target duration
+  const epochsPerYear = TIME_CONSTANTS.EPOCHS_PER_DAY * 365n;
+  const targetEpochs = BigInt(
+    Math.floor(config.targetFundingYears * Number(epochsPerYear))
+  );
+  const targetFunds = info.lockupRate * targetEpochs;
+  const depositAmount = targetFunds - info.availableFunds;
+
+  if (depositAmount <= 0n) {
+    console.log("✅ Already at target funding");
+    return false;
+  }
+
+  console.log(
+    `Topping up ${ethers.formatUnits(depositAmount, 18)} USDFC to restore ${config.targetFundingYears} year funding...`
+  );
+
+  // Check wallet balance
+  const walletBalance = await synapse.payments.walletBalance(TOKENS.USDFC);
+
+  if (walletBalance < depositAmount) {
+    console.error("❌ Insufficient wallet balance!");
+    console.error("Need:", ethers.formatUnits(depositAmount, 18), "USDFC");
+    console.error("Have:", ethers.formatUnits(walletBalance, 18), "USDFC");
+    return false;
+  }
+
+  // Execute deposit
+  try {
+    const tx = await synapse.payments.depositWithPermit(
+      depositAmount,
+      TOKENS.USDFC
+    );
+    console.log("Transaction sent:", tx.hash);
+    await tx.wait();
+
+    // Verify
+    const newInfo = await synapse.payments.accountInfo();
+    const newEpochsRemaining =
+      newInfo.lockupRate > 0n
+        ? newInfo.availableFunds / newInfo.lockupRate
+        : 0n;
+    const newDaysRemaining =
+      Number(newEpochsRemaining) / Number(TIME_CONSTANTS.EPOCHS_PER_DAY);
+
+    console.log(`✅ Auto-topped up successfully!`);
+    console.log(`New funding duration: ${newDaysRemaining.toFixed(1)} days`);
+
+    return true;
+  } catch (error) {
+    console.error("❌ Auto-top-up failed:", error);
+    return false;
+  }
+}
+
+// Example usage
+const config: AutoTopUpConfig = {
+  targetFundingYears: 1, // Always maintain 1 year
+  minFundingDays: 180, // Top up when below 6 months
+};
+
+const topped = await autoTopUp(synapse, config);
+```
+
+
+## Next Steps
+
+- [**Calculate Storage Costs**](/synapse-sdk/payments/storage-costs) - Learn to calculate costs and deposit
+- [**Payment Overview**](/synapse-sdk/payments/) - Understand the payment system
+- [**Troubleshooting**](/synapse-sdk/payments/troubleshooting) - Fix common issues
+
+## Summary
+
+**Key Monitoring Actions:**
+
+- Check `availableFunds` regularly
+- Calculate funding runway: `availableFunds / lockupRate`
+- Monitor burn rate to understand costs
+- Set up automated alerts with threshold levels
+- Implement auto-topping to maintain target funding
+
+**Alert Levels:**
+
+- **CRITICAL**: < 30 days (immediate action)
+- **WARNING**: < 90 days (plan top-up)
+- **LOW**: < 180 days (monitor closely)
+- **HEALTHY**: >= 180 days (all good)
+
+**Auto-Topping Benefits:**
+
+- Never run out of funds unexpectedly
+- Maintain consistent funding duration
+- Reduce manual intervention
+- Get alerted only on failures
+
+**Essential Functions:**
+
+- `accountInfo()` - Get current state
+- `getCurrentEpoch()` - Get current blockchain epoch
+- `depositWithPermit()` - Gas-efficient top-up
+- `walletBalance()` - Check wallet funds
+
+Ready to understand payment system internals? See [Payment Overview](/synapse-sdk/payments/)!

@@ -1,0 +1,403 @@
+---
+title: How to Upload a File
+description: How to Upload a File using the Synapse SDK.
+sidebar:
+  order: 2
+---
+
+This guide shows you how to upload files to Filecoin On-Chain Cloud storage using the Synapse SDK. You'll learn both simple and production-ready approaches with Node.js and Ethers.js.
+
+For core concepts like PieceCID, storage contexts, and data sets, see the [Storage Overview](/synapse-sdk/storage/).
+
+## Prerequisites
+
+Before uploading files, ensure you have:
+
+1. **Synapse SDK installed**:
+
+```bash
+npm install @filoz/synapse-sdk ethers
+```
+
+2. **Environment setup**:
+
+```bash
+# Required environment variables
+PRIVATE_KEY=your_wallet_private_key
+RPC_URL=https://api.calibration.node.glif.io/rpc/v1
+```
+
+3. **Account funded** with USDFC tokens:
+   - See [How to Top Up Balance](/synapse-sdk/payments/storage-monitoring)
+   - Minimum recommended: 10 USDFC for testing
+
+4. **Operator approved** (if not done already):
+   - WarmStorage contract needs approval to create payment rails
+   - Can be done in same transaction as deposit using permit
+
+## Quick Start: Simple Upload
+
+The simplest way to upload a file uses auto-managed storage:
+
+```javascript
+import { Synapse } from "@filoz/synapse-sdk";
+import { readFileSync } from "fs";
+
+// Initialize SDK
+const synapse = await Synapse.create({
+  privateKey: process.env.PRIVATE_KEY,
+  rpcURL: process.env.RPC_URL,
+});
+
+// Read file data
+const fileData = readFileSync("./my-file.txt");
+
+// Upload (auto-managed: SDK handles provider selection and data set)
+const result = await synapse.storage.upload(fileData, {
+  metadata: {
+    filename: "my-file.txt",
+    contentType: "text/plain",
+  },
+});
+
+console.log("✅ Upload complete!");
+console.log("PieceCID:", result.pieceCid);
+console.log("Provider:", result.serviceProvider);
+console.log("Data Set ID:", result.dataSetId);
+```
+
+**What happens**:
+
+1. SDK automatically selects a provider
+2. Creates or reuses a data set (payment rail is established when data set is created)
+3. Uploads file and gets PieceCID
+4. Returns upload result
+
+**Note**: Payment rails are created during data set creation, not during individual file uploads. If you don't specify a data set, the SDK creates one implicitly (which establishes the rail). Subsequent uploads to the same data set reuse its existing payment rail.
+
+## Complete Upload Example
+
+For production use, you want more control and visibility:
+
+```javascript
+import { Synapse, TOKENS, TIME_CONSTANTS } from "@filoz/synapse-sdk";
+import { ethers } from "ethers";
+import { readFileSync } from "fs";
+
+async function uploadWithPreflightChecks() {
+  // 1. Initialize SDK
+  const synapse = await Synapse.create({
+    privateKey: process.env.PRIVATE_KEY,
+    rpcURL: process.env.RPC_URL,
+  });
+
+  console.log("Connected as:", await synapse.signer.getAddress());
+
+  // 2. Check account balance
+  const accountInfo = await synapse.payments.accountInfo();
+  const currentEpoch = accountInfo.currentEpoch;
+  const fundedUntil = accountInfo.fundedUntilEpoch;
+  const epochsRemaining = fundedUntil - currentEpoch;
+  const daysRemaining =
+    Number(epochsRemaining) / Number(TIME_CONSTANTS.EPOCHS_PER_DAY);
+
+  console.log(
+    "Account balance:",
+    ethers.formatUnits(accountInfo.currentFunds, 18),
+    "USDFC"
+  );
+  console.log("Days remaining:", daysRemaining.toFixed(1));
+
+  if (daysRemaining < 7) {
+    throw new Error(
+      "⚠️ Low balance! Top up before uploading. See: /synapse-sdk/payments/storage-monitoring"
+    );
+  }
+
+  // 3. Read and validate file
+  const filePath = "./my-document.pdf";
+  const fileData = readFileSync(filePath);
+  const fileSizeKB = fileData.length / 1024;
+
+  console.log(`File size: ${fileSizeKB.toFixed(2)} KB`);
+
+  if (fileData.length === 0) {
+    throw new Error("File is empty");
+  }
+
+  // 4. Create storage context with callbacks
+  const storageContext = await synapse.storage.createContext({
+    withCDN: false, // Set true for CDN access
+    callbacks: {
+      onProviderSelected: (provider) => {
+        console.log(`✓ Selected provider: ${provider.serviceProvider}`);
+        console.log(
+          `  Price: ${ethers.formatUnits(provider.pricePerEpochPerByte, 18)} USDFC/byte/epoch`
+        );
+      },
+      onDataSetResolved: (info) => {
+        if (info.isExisting) {
+          console.log(`✓ Reusing data set: ${info.dataSetId}`);
+        } else {
+          console.log(`✓ Creating new data set: ${info.dataSetId}`);
+        }
+      },
+    },
+  });
+
+  // 5. Preflight check (optional but recommended)
+  try {
+    const preflightResult = await storageContext.preflightUpload(fileData);
+
+    console.log("\n=== Preflight Check ===");
+    console.log("PieceCID:", preflightResult.pieceCid);
+    console.log("Piece size:", preflightResult.pieceSize, "bytes");
+    console.log(
+      "Estimated cost:",
+      ethers.formatUnits(preflightResult.estimatedCost, 18),
+      "USDFC/epoch"
+    );
+    console.log(
+      "Lockup required:",
+      ethers.formatUnits(preflightResult.lockupRequired, 18),
+      "USDFC"
+    );
+
+    // Check if we can afford it
+    if (preflightResult.estimatedCost > accountInfo.availableFunds) {
+      throw new Error("Insufficient available funds for upload");
+    }
+  } catch (error) {
+    console.error("Preflight check failed:", error);
+    throw error;
+  }
+
+  // 6. Upload with progress tracking
+  console.log("\n=== Starting Upload ===");
+
+  const result = await storageContext.upload(fileData, {
+    metadata: {
+      filename: "my-document.pdf",
+      contentType: "application/pdf",
+      uploadedAt: new Date().toISOString(),
+    },
+    onUploadProgress: (progress) => {
+      console.log(`Upload progress: ${progress.percentage}%`);
+    },
+    onUploadComplete: (pieceCid) => {
+      console.log(`✓ Upload complete: ${pieceCid}`);
+    },
+  });
+
+  // 7. Verify upload
+  console.log("\n=== Upload Result ===");
+  console.log("PieceCID:", result.pieceCid);
+  console.log("Provider:", result.serviceProvider);
+  console.log("Data Set ID:", result.dataSetId);
+  console.log("Rail ID:", result.railId);
+  console.log("Piece Size:", result.pieceSize, "bytes");
+
+  // 8. Wait for PDP proof to be verified (optional)
+  console.log("\n=== Waiting for PDP Verification ===");
+  console.log("This may take a few minutes...");
+
+  // PDP challenges happen automatically
+  // Provider generates proofs which are verified by PDPVerifier contract
+  // You can monitor this using the PDP service
+
+  return result;
+}
+
+// Run
+uploadWithPreflightChecks()
+  .then((result) => {
+    console.log("\n✅ Success! Your file is stored on Filecoin.");
+    console.log("Save this PieceCID to retrieve later:", result.pieceCid);
+  })
+  .catch((error) => {
+    console.error("\n❌ Upload failed:", error);
+    process.exit(1);
+  });
+```
+
+**Key steps explained**:
+
+1. **Initialize SDK**: Connect with your wallet
+2. **Check balance**: Ensure sufficient funds for storage
+3. **Validate file**: Check file exists and is not empty
+4. **Create context**: Set up storage context with callbacks
+5. **Preflight check**: Estimate costs before committing
+6. **Upload**: Send file with progress tracking
+7. **Verify result**: Confirm PieceCID and provider details
+8. **PDP verification**: Provider generates proofs automatically
+
+## Upload with Storage Context
+
+For more control, create a storage context explicitly:
+
+```javascript
+import { Synapse } from "@filoz/synapse-sdk";
+import { readFileSync } from "fs";
+
+async function uploadWithContext() {
+  const synapse = await Synapse.create({
+    privateKey: process.env.PRIVATE_KEY,
+    rpcURL: process.env.RPC_URL,
+  });
+
+  // Create context with callbacks for visibility
+  const storageContext = await synapse.storage.createContext({
+    withCDN: false,
+    callbacks: {
+      onProviderSelected: (provider) => {
+        console.log("Provider:", provider.serviceProvider);
+      },
+      onDataSetResolved: (info) => {
+        console.log("Data Set:", info.dataSetId);
+      },
+    },
+  });
+
+  // Upload multiple files to same context (reuses provider and data set)
+  const file1 = readFileSync("./doc1.pdf");
+  const file2 = readFileSync("./doc2.pdf");
+
+  const result1 = await storageContext.upload(file1, {
+    metadata: { filename: "doc1.pdf" },
+  });
+  console.log("Uploaded:", result1.pieceCid);
+
+  const result2 = await storageContext.upload(file2, {
+    metadata: { filename: "doc2.pdf" },
+  });
+  console.log("Uploaded:", result2.pieceCid);
+
+  return { result1, result2 };
+}
+
+uploadWithContext().catch(console.error);
+```
+
+**Benefits**:
+
+- Reuses same provider and data set
+- Lower gas costs for multiple uploads
+- More control over provider selection
+
+For provider selection and discovery, see [How to Create a Data Set](/synapse-sdk/storage/create-dataset).
+
+## Error Handling
+
+For production uploads, implement retry logic and handle common errors. See the [Storage Troubleshooting Guide](/synapse-sdk/storage/troubleshooting) for detailed error handling patterns including:
+
+- Insufficient funds errors
+- Operator approval errors
+- Network timeouts and retries
+- Rate limiting with exponential backoff
+
+**Quick error handling example**:
+
+```javascript
+async function uploadWithRetry(fileData, maxRetries = 3) {
+  const synapse = await Synapse.create({
+    privateKey: process.env.PRIVATE_KEY,
+    rpcURL: process.env.RPC_URL,
+  });
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await synapse.storage.upload(fileData, {
+        metadata: { filename: "my-file.txt" },
+      });
+    } catch (error) {
+      if (attempt === maxRetries) throw error;
+
+      // Retry on network errors
+      if (
+        error.message.includes("network") ||
+        error.message.includes("timeout")
+      ) {
+        const waitTime = Math.pow(2, attempt) * 1000;
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+        continue;
+      }
+
+      throw error; // Non-retryable error
+    }
+  }
+}
+```
+
+## Best Practices
+
+**Before Upload**:
+
+- Check account balance (ensure at least 7 days runway)
+- Validate file exists and is not empty
+- Run preflight check to estimate costs
+- Ensure WarmStorage operator approval
+
+**During Upload**:
+
+- Use callbacks to track progress
+- Reuse storage context for multiple files
+- Set meaningful metadata (filename, content type, timestamps)
+- Implement retry logic for network errors
+
+**After Upload**:
+
+- Save the PieceCID for future retrieval
+- Monitor your account balance and burn rate
+- Track PDP proofs (provider handles automatically)
+
+**For Production**:
+
+- Implement exponential backoff for retries
+- Keep minimum 7-day balance buffer
+- Log all operations with timestamps
+- Set up monitoring and alerts
+
+## Troubleshooting
+
+For common upload errors and solutions, see the [Storage Troubleshooting Guide](/synapse-sdk/storage/troubleshooting), which covers:
+
+- Insufficient funds and balance issues
+- Operator approval errors
+- Provider availability problems
+- Network timeouts and connectivity
+- File validation errors
+
+## Next Steps
+
+Now that you can upload files:
+
+- [**Retrieve Files**](/synapse-sdk/storage/retrieve) - Download your stored data
+- [**Create Data Sets**](/synapse-sdk/storage/create-dataset) - Explicit data set and provider management
+- [**Storage Troubleshooting**](/synapse-sdk/storage/troubleshooting) - Error handling and solutions
+- [**Monitor Usage**](/synapse-sdk/payments/storage-monitoring/) - Track costs and ingress
+
+## Summary
+
+**Key Functions**:
+
+- `synapse.storage.upload(data)` - Simple auto-managed upload
+- `synapse.storage.createContext()` - Create storage context with callbacks
+- `storageContext.upload(data)` - Upload with existing context
+- `storageContext.preflightUpload(data)` - Cost estimation before upload
+
+**Essential Checks**:
+
+- Account balance and runway (minimum 7 days recommended)
+- File validation (exists, not empty)
+- Preflight cost estimation
+- Operator approval for WarmStorage
+
+**Production Tips**:
+
+- Implement retry logic with exponential backoff
+- Use callbacks for progress tracking
+- Reuse storage contexts for multiple files
+- Always set metadata (filename, content type, timestamps)
+- Monitor balance and burn rate continuously
+
+Ready to retrieve your files? See [How to Retrieve a File](/synapse-sdk/storage/retrieve)!

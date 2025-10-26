@@ -1,0 +1,26 @@
+sequenceDiagram
+    participant User
+    participant SDK
+    participant WarmStorage
+    participant PDPRegistry
+    participant FilecoinPay
+
+    User->>SDK: uploadFile(data)
+    SDK->>SDK: Calculate storage cost
+    Note over SDK: MIN_SIZE: 127 bytes<br/>Price: per byte/epoch
+    SDK->>WarmStorage: estimateStorageCost(size, duration)
+    WarmStorage-->>SDK: requiredFIL
+
+    SDK->>User: Approve payment?
+    User->>SDK: Confirm
+
+    SDK->>FilecoinPay: createPaymentChannel(amount)
+    FilecoinPay-->>SDK: channelId
+
+    SDK->>WarmStorage: createStorage(data, channelId)
+    WarmStorage->>PDPRegistry: registerProofs(storageId)
+    PDPRegistry-->>WarmStorage: proofSchedule
+    WarmStorage-->>SDK: storageId, cid
+    SDK-->>User: Upload complete
+
+    Note over FilecoinPay,WarmStorage: Payment settled per epoch

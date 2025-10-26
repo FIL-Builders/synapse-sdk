@@ -1,0 +1,82 @@
+---
+title: FAQ
+description: Frequently Asked Questions about Filecoin Onchain Cloud
+sidebar:
+  order: 1
+---
+
+## General Questions
+
+---
+
+### What is Filecoin Onchain Cloud?
+
+Filecoin Onchain Cloud is a smart-contract marketplace for decentralized storage services built on the Filecoin network. It allows developers to store and retrieve data on Filecoin using a simple TypeScript SDK, with all storage agreements and payments managed by smart contracts.
+
+### How does Filecoin Onchain Cloud work?
+
+Filecoin Onchain Cloud works by using a combination of smart contracts and decentralized storage to provide a secure and reliable storage solution.
+
+### How do I get started with Filecoin Onchain Cloud?
+
+You can get started with Filecoin Onchain Cloud by using the [Synapse SDK](/getting-started/).
+
+## PDP Questions
+
+---
+
+### How often are proofs required?
+
+Every 30 minutes to 24 hours (configurable). Typical production: once per day.
+
+### What happens if my provider goes offline?
+
+Fault is reported on-chain. You're protected by the lockup period—typically 30 days of guaranteed payment coverage. Provider can recover by coming back online.
+
+### How much does verification cost?
+
+~$0.05-0.20 per proof in gas fees. Provider pays this, factored into storage pricing.
+
+### Can I verify proofs myself?
+
+Yes! All proofs are public on-chain. You can independently verify using the PDPVerifier contract.
+
+### How often are proofs required?
+
+Depends on the `challengeDelay` parameter. Typical values:
+
+- Testing: Every 60 epochs (~30 minutes)
+- Production: Every 2,880 epochs (~1 day)
+
+### What happens if provider goes offline?
+
+- If offline during challenge window → fault reported
+- Provider can call `nextProvingPeriod()` to acknowledge
+- Fault may trigger payment adjustments
+- Provider can recover by coming back online
+
+### Can clients verify proofs themselves?
+
+Yes! Proofs are public on-chain:
+
+- Read proof events from PDPVerifier
+- Recompute Merkle verification
+- Independent verification possible
+
+### How much does it cost to store data?
+
+Gas costs for PDP operations:
+
+- One-time: `createDataSet` (~$0.10-1)
+- Per piece: `addPieces` (~$0.05-0.5 per piece)
+- Ongoing: `provePieces` (~$0.05-0.2 per proof)
+- Plus storage provider's fees (see pricing)
+
+### What prevents providers from cheating?
+
+Multiple protections:
+
+- **Unpredictable challenges**: Cannot predict which data will be checked
+- **Cryptographic proofs**: Cannot fake without actual data
+- **Frequent challenges**: Must maintain data continuously
+- **Economic incentives**: Faults affect reputation and payments

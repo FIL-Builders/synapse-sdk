@@ -1,0 +1,420 @@
+---
+title: Overview
+description: Developers with Filecoin Onchain Cloud.
+sidebar:
+  order: 0
+---
+
+Welcome to the Synapse SDK Developer Guide! This section will help you build applications with the Filecoin On-Chain Cloud storage marketplace.
+
+## Getting Started
+
+### Installation
+
+```bash
+npm install @filoz/synapse-sdk ethers@6
+```
+
+### First Steps
+
+If you're new to Synapse SDK, follow this learning path:
+
+1. **[Quick Start](/getting-started/)** - Get up and running in minutes with simple upload/download examples
+2. **[Payment Setup](/synapse-sdk/payments/)** - Learn how to fund your account and approve storage services
+3. **[Storage Operations](/synapse-sdk/storage/)** - Master upload, download, and data set management
+
+### API Reference
+
+For detailed API documentation, see the [auto-generated API reference](/api).
+
+## SDK Design Philosophy
+
+The Synapse SDK is designed with two key principles:
+
+### 1. Simple Golden Path
+
+The main `Synapse` class provides a **high-level API with sensible defaults** that handles complexity for you:
+
+```typescript
+// Initialize with minimal configuration
+const synapse = await Synapse.create({ provider });
+
+// Simple upload - SDK handles everything
+const result = await synapse.storage.upload(data);
+
+// Simple download - SDK finds the piece automatically
+const retrieved = await synapse.storage.download(pieceCid);
+```
+
+**What the SDK auto-manages:**
+
+- Network detection from provider's chainId
+- Contract address discovery
+- Provider selection
+- Data set creation and reuse
+- Payment rail creation
+- Transaction nonce management
+
+### 2. Composable Components
+
+For advanced use cases, **all components are exported** and can be used independently:
+
+```typescript
+import {
+  PaymentsService,
+  WarmStorageService,
+  StorageContext,
+  PDPAuthHelper,
+  PDPServer,
+} from "@filoz/synapse-sdk";
+
+// Create services independently
+const paymentsService = new PaymentsService(provider, signer, paymentsAddress);
+const warmStorage = await WarmStorageService.create(
+  provider,
+  warmStorageAddress
+);
+
+// Use lower-level APIs for fine-grained control
+const context = await StorageContext.create(synapse, {
+  providerId: 5,
+  dataSetId: 123,
+  metadata: { environment: "production" },
+});
+```
+
+This design means:
+
+- **Beginners**: Use `Synapse` class for simple, automatic operations
+- **Advanced users**: Access underlying services for custom workflows
+- **Library authors**: Build on individual components
+
+## Development Workflow
+
+Here's a typical development workflow with the SDK:
+
+### 1. Setup & Configuration
+
+**Network Selection**:
+
+```typescript
+import { Synapse, RPC_URLS } from "@filoz/synapse-sdk";
+
+// Calibration testnet (for development)
+const synapse = await Synapse.create({
+  privateKey: process.env.PRIVATE_KEY,
+  rpcURL: RPC_URLS.calibration.websocket,
+});
+
+// Mainnet (when ready for production)
+// const synapse = await Synapse.create({
+//   privateKey: process.env.PRIVATE_KEY,
+//   rpcURL: RPC_URLS.mainnet.http
+// })
+```
+
+**Wallet Integration**:
+
+```typescript
+// MetaMask / Browser wallet
+const provider = new ethers.BrowserProvider(window.ethereum)
+const synapse = await Synapse.create({ provider })
+
+// Hardware wallet / WalletConnect
+const signer = /* your signer */
+const synapse = await Synapse.create({ signer })
+```
+
+[Learn more about initialization options →](/getting-started/)
+
+### 2. Payment Management
+
+**One-Time Setup**:
+
+```typescript
+import { ethers } from "ethers";
+
+// Deposit USDFC tokens
+await synapse.payments.deposit(ethers.parseUnits("100", 18));
+
+// Approve storage service
+const warmStorageAddr = await synapse.getWarmStorageAddress();
+await synapse.payments.approveService(
+  warmStorageAddr,
+  ethers.parseUnits("10", 18), // Rate: 10 USDFC/epoch
+  ethers.parseUnits("1000", 18), // Lockup: 1000 USDFC max
+  2880n // Period: 1 day (in epochs)
+);
+```
+
+**Ongoing Monitoring**:
+
+```typescript
+// Check account health
+const accountInfo = await synapse.payments.accountInfo();
+console.log("Funded until epoch:", accountInfo.fundedUntilEpoch);
+
+// View payment rails
+const rails = await synapse.payments.getRailsAsPayer();
+for (const rail of rails) {
+  console.log(`Rail ${rail.id}: ${rail.paymentRate} USDFC/epoch`);
+}
+```
+
+[Detailed payment guide →](/synapse-sdk/payments/)
+
+### 3. Storage Operations
+
+**Auto-Managed Approach** (Recommended for most use cases):
+
+```typescript
+// SDK handles provider selection and data set management
+const result = await synapse.storage.upload(fileData, {
+  metadata: { filename: "report.pdf", category: "documents" },
+});
+
+// Download from any provider
+const data = await synapse.storage.download(result.pieceCid);
+```
+
+**Explicit Control** (Advanced):
+
+```typescript
+// Create storage context with specific provider
+const context = await synapse.storage.createContext({
+  providerId: 5,
+  metadata: { project: "myapp", environment: "prod" },
+  callbacks: {
+    onProviderSelected: (provider) => {
+      console.log("Selected provider:", provider.id);
+    },
+    onDataSetCreationStarted: (txHash) => {
+      console.log("Creating data set:", txHash);
+    },
+    onUploadComplete: (pieceCid) => {
+      console.log("Upload complete:", pieceCid);
+    },
+  },
+});
+
+// Use context for uploads
+await context.upload(data1);
+await context.upload(data2); // Same provider, same data set
+```
+
+[Storage operations guide →](/synapse-sdk/storage/)
+
+### 4. Progress Tracking
+
+For better user experience, track operation progress with callbacks:
+
+```typescript
+const context = await synapse.storage.createContext({
+  callbacks: {
+    onProviderSelected: (info) => {
+      setProgress({ stage: "provider_selected", percent: 10 });
+    },
+    onDataSetResolved: (dataSetId) => {
+      setProgress({ stage: "dataset_ready", percent: 25 });
+    },
+    onDataSetCreationStarted: (txHash) => {
+      setProgress({ stage: "dataset_creating", percent: 20 });
+    },
+    onDataSetCreationProgress: (status) => {
+      if (status === "confirmed") {
+        setProgress({ stage: "dataset_confirmed", percent: 30 });
+      }
+    },
+    onUploadComplete: (pieceCid) => {
+      setProgress({ stage: "uploaded", percent: 60 });
+    },
+    onPieceAdded: (txHash) => {
+      setProgress({ stage: "piece_adding", percent: 80 });
+    },
+    onPieceConfirmed: (receipt) => {
+      setProgress({ stage: "complete", percent: 100 });
+    },
+  },
+});
+```
+
+See [fs-upload-dapp](https://github.com/FilOzone/fs-upload-dapp) for a complete React implementation with progress tracking.
+
+## SDK Architecture
+
+### Core Components
+
+**Synapse** - Main entry point
+
+- Factory method: `Synapse.create(options)`
+- Properties: `payments`, `storage`
+- Methods: `getWarmStorageAddress()`, `getProvider()`, `getSigner()`
+
+**PaymentsService** - Payment operations
+
+- Deposits: `deposit()`, `depositWithPermit()`
+- Approvals: `approveService()`, `revokeService()`
+- Balances: `balance()`, `walletBalance()`, `accountInfo()`
+- Rails: `getRailsAsPayer()`, `getRailsAsPayee()`, `settle()`
+
+**StorageManager** - Auto-managed storage
+
+- Simple operations: `upload()`, `download()`
+- Context creation: `createContext()`
+- Service info: `getStorageInfo()`
+
+**StorageContext** - Provider-specific operations
+
+- Upload/download: `upload()`, `download()`
+- Piece queries: `hasPiece()`, `pieceStatus()`, `getDataSetPieces()`
+- Provider info: `getProviderInfo()`
+
+**Supporting Services**:
+
+- `WarmStorageService` - Storage coordination and pricing
+- `PDPAuthHelper` - EIP-712 signature generation
+- `PDPServer` - Curio HTTP API client
+- `SPRegistryService` - Provider registry access
+
+### Type System
+
+The SDK is fully typed with TypeScript. Key interfaces:
+
+```typescript
+interface SynapseOptions {
+  privateKey?: string;
+  provider?: ethers.Provider;
+  signer?: ethers.Signer;
+  rpcURL?: string;
+  withCDN?: boolean;
+  disableNonceManager?: boolean;
+}
+
+interface UploadOptions {
+  metadata?: Record<string, string>;
+  callbacks?: StorageCallbacks;
+}
+
+interface StorageCallbacks {
+  onProviderSelected?: (info: ProviderInfo) => void;
+  onDataSetResolved?: (dataSetId: bigint) => void;
+  onDataSetCreationStarted?: (txHash: string) => void;
+  onDataSetCreationProgress?: (status: string) => void;
+  onUploadComplete?: (pieceCid: string) => void;
+  onPieceAdded?: (txHash: string) => void;
+  onPieceConfirmed?: (receipt: TransactionReceipt) => void;
+}
+```
+
+[Full API reference →](/api)
+
+## Best Practices
+
+### Error Handling
+
+Always wrap SDK calls in try-catch blocks:
+
+```typescript
+try {
+  const result = await synapse.storage.upload(data);
+  console.log("Success:", result.pieceCid);
+} catch (error) {
+  if (error.code === "INSUFFICIENT_FUNDS") {
+    console.error("Need to deposit more USDFC");
+  } else if (error.code === "PROVIDER_UNAVAILABLE") {
+    console.error("Storage provider is offline");
+  } else {
+    console.error("Upload failed:", error.message);
+  }
+}
+```
+
+### Resource Cleanup
+
+When using WebSocket connections, always clean up:
+
+```typescript
+const synapse = await Synapse.create({
+  rpcURL: RPC_URLS.calibration.websocket,
+});
+
+try {
+  // Use SDK...
+  await synapse.storage.upload(data);
+} finally {
+  // Clean up connection
+  const provider = synapse.getProvider();
+  if (provider?.destroy) {
+    await provider.destroy();
+  }
+}
+```
+
+### Performance Optimization
+
+**Batch Uploads**:
+
+```typescript
+// Multiple uploads to same context are automatically batched
+const context = await synapse.storage.createContext();
+await Promise.all([
+  context.upload(file1),
+  context.upload(file2),
+  context.upload(file3),
+]); // All added in single transaction
+```
+
+**Reuse Contexts**:
+
+```typescript
+// Don't create new context for each upload
+const context = await synapse.storage.createContext();
+
+// Reuse for multiple uploads
+for (const file of files) {
+  await context.upload(file);
+}
+```
+
+**Use WebSockets**:
+
+```typescript
+// WebSocket connections are faster for multiple operations
+const synapse = await Synapse.create({
+  rpcURL: RPC_URLS.calibration.websocket, // Faster than HTTP
+});
+```
+
+## Next Steps
+
+### Guides by Topic
+
+Choose a guide based on what you want to build:
+
+**Payment Integration**
+
+- [Payment Setup & Management](/synapse-sdk/payments/) - Deposits, approvals, rails
+- [Top Up Balance](/synapse-sdk/payments/storage-monitoring) - Step-by-step funding guide
+- [Monitor Usage](/synapse-sdk/payments/storage-monitoring/) - Track costs and consumption
+
+**Storage Operations**
+
+- [Storage Guide](/synapse-sdk/storage/) - Upload, download, data sets
+- [Upload Files](/synapse-sdk/storage/upload) - Detailed upload walkthrough
+- [Download Files](/synapse-sdk/storage/retrieve) - Retrieval patterns
+- [Create Data Sets](/synapse-sdk/storage/create-dataset) - Explicit data set management
+
+### Reference Resources
+
+- [Core Concepts](/core-concepts/) - Understand PDP, payments, and architecture
+- [API Documentation](/api) - Complete API reference with all methods and types
+- [Quick Start](/getting-started/) - Get started in minutes
+- [fs-upload-dapp](https://github.com/FilOzone/fs-upload-dapp) - Production reference implementation
+
+## Support & Community
+
+- **GitHub**: [FilOzone/synapse-sdk](https://github.com/FilOzone/synapse-sdk) - Report issues, contribute
+- **Documentation**: You're here! Browse the guides and API reference
+- **Examples**: See [fs-upload-dapp](https://github.com/FilOzone/fs-upload-dapp) for React/Next.js patterns
+
+Happy building! 🚀

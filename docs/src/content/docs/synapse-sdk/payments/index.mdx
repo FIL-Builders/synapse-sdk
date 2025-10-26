@@ -1,0 +1,290 @@
+---
+title: Overview
+description: Overview of Filecoin Pay using the Synapse SDK.
+sidebar:
+  order: 0
+---
+
+This guide explains how to manage payments for Filecoin On-Chain Cloud storage using the Synapse SDK. Learn about the payment system, key concepts, and how to navigate the payment guides.
+
+:::note[Understanding the Protocol]
+This guide focuses on SDK implementation. For deep technical details about the FilecoinPay protocol architecture, payment rail mechanics, lockup safety hatch, and security properties, see [FilecoinPay Technical Overview](/core-concepts/filecoin-pay-overview).
+:::
+
+## What is the Payment System?
+
+The Synapse SDK provides a `PaymentsService` API that wraps the Filecoin Pay V1 smart contract. All storage services require USDFC token deposits and proper operator approvals to create automated payment channels called "rails."
+
+Payment rails enable continuous, automated payments from your account to storage providers based on storage usage over time. You deposit funds once, approve an operator (like WarmStorage), and the system handles ongoing payments automatically.
+
+## Key Concepts
+
+**USDFC Token**: ERC-20 stablecoin (≈1 USD) used for all storage payments on Filecoin On-Chain Cloud.
+
+**Payment Rails**: Automated payment channels between you (payer) and storage providers (payees). Rails stream payments at a fixed rate per epoch based on your storage usage.
+
+**Operator**: A service contract (like WarmStorage) that you authorize to create and manage payment rails on your behalf. Operators need allowances to act within limits you set.
+
+**Allowances**: Limits you set for what an operator can do with your funds:
+
+- **Rate Allowance**: Maximum cumulative payment rate across all rails (USDFC/epoch)
+- **Lockup Allowance**: Maximum total amount locked across all rails (USDFC)
+- **Max Lockup Period**: Maximum duration for any single rail (epochs)
+
+**Epoch**: 30-second time unit on Filecoin (2,880 epochs = 1 day). Payments accrue per epoch.
+
+**Lockup**: Funds reserved to guarantee provider payment for a specific duration. Your available funds decrease by the lockup rate every epoch.
+
+**Available Funds**: Your deposited balance available for new payments and ongoing rails. This is what you can withdraw.
+
+## Quick Start
+
+### 1. Initialize SDK
+
+```typescript
+import { Synapse, RPC_URLS } from "@filoz/synapse-sdk";
+
+const synapse = await Synapse.create({
+  privateKey: process.env.PRIVATE_KEY,
+  rpcURL: RPC_URLS.calibration.http,
+});
+```
+
+### 2. Check Your Balance
+
+```typescript
+import { TOKENS } from "@filoz/synapse-sdk";
+import { ethers } from "ethers";
+
+// Check wallet balance (before deposit)
+const walletBalance = await synapse.payments.walletBalance(TOKENS.USDFC);
+console.log("Wallet:", ethers.formatUnits(walletBalance, 18), "USDFC");
+
+// Check deposited balance (in Payments contract)
+const depositedBalance = await synapse.payments.balance();
+console.log("Deposited:", ethers.formatUnits(depositedBalance, 18), "USDFC");
+```
+
+### 3. Fund Your Account (First Time)
+
+For initial setup, deposit funds and approve the operator in one transaction:
+
+```typescript
+import { ethers } from "ethers";
+import { TIME_CONSTANTS } from "@filoz/synapse-sdk";
+
+const warmStorageAddr = synapse.getWarmStorageAddress();
+
+// Single transaction: deposit + approve operator
+await synapse.payments.depositWithPermitAndApproveOperator(
+  ethers.parseUnits("100", 18), // Deposit 100 USDFC
+  warmStorageAddr, // WarmStorage operator
+  ethers.parseUnits("10", 18), // Rate allowance: 10 USDFC/epoch
+  ethers.parseUnits("50000", 18), // Lockup allowance: 50,000 USDFC
+  TIME_CONSTANTS.EPOCHS_PER_DAY * 365n // Max period: 365 days
+);
+
+console.log("✅ Payment setup complete!");
+```
+
+**Why use permits?** Permits (EIP-2612) combine approval and deposit in one transaction, saving gas and improving user experience.
+
+## Payment Flow
+
+Here's what happens when you use storage:
+
+### 1. Fund Your Account
+
+Deposit USDFC tokens and approve WarmStorage as your operator with allowance limits.
+
+### 2. Create Data Set and Upload Data
+
+When you create a data set (explicitly or implicitly during your first upload), WarmStorage establishes a payment rail to the storage provider. This rail handles ongoing payments for all files in that data set. Subsequent uploads to the same data set reuse the existing payment rail.
+
+### 3. Automatic Payments
+
+Payments accrue every epoch (30 seconds). Providers periodically settle to collect earned tokens. You maintain sufficient balance to keep rails funded.
+
+### 4. Monitor Your Account
+
+Track your account balance, lockup rate, and estimated funding duration. Top up before funds run out.
+
+## Important SDK Limitation
+
+:::caution[fundedUntilEpoch Not Available]
+The SDK's `accountInfo()` method does not return `fundedUntilEpoch`, which would tell you exactly when your account runs out of funds. You must calculate approximate runway manually using `availableFunds / lockupRate`.
+
+See the [Monitoring Guide](/synapse-sdk/payments/storage-monitoring/) for the calculation workaround and monitoring best practices.
+:::
+
+**What you CAN get from the SDK:**
+
+```typescript
+const info = await synapse.payments.accountInfo();
+
+console.log("Available funds:", info.availableFunds); // Can withdraw
+console.log("Locked funds:", info.lockupCurrent); // Locked in rails
+console.log("Lockup rate:", info.lockupRate); // USDFC/epoch
+console.log("Last settled:", info.lockupLastSettledAt); // Epoch number
+```
+
+**What you must calculate:**
+
+- Funding duration: `availableFunds / lockupRate` (in epochs)
+- Monthly burn rate: `lockupRate * EPOCHS_PER_DAY * 30`
+- Funded until epoch: `currentEpoch + (availableFunds / lockupRate)`
+
+## Understanding Payment Rails
+
+Payment rails are automated payment channels managed by WarmStorage. Each rail represents ongoing payment to a storage provider for a specific data set.
+
+**Key Concept**: Payment rails are created per data set, not per upload. When you create a data set (explicitly or implicitly during upload), a payment rail is established with the storage provider. Multiple files uploaded to the same data set share the same payment rail.
+
+**Viewing your rails:**
+
+```typescript
+const rails = await synapse.payments.getRailsAsPayer();
+
+for (const rail of rails) {
+  console.log(`Rail ${rail.id}:`);
+  console.log("  Provider:", rail.payee);
+  console.log("  Rate:", rail.paymentRate, "USDFC/epoch");
+  console.log("  Active:", rail.endEpoch === 0n);
+}
+```
+
+Rails continue until the storage provider terminates them or you stop the service.
+
+### Data Sets and Payment Rails
+
+**One data set = One payment rail = One storage provider**
+
+- When you create a data set (explicitly via `createContext()` or implicitly during first upload), the SDK establishes a payment rail
+- All files in that data set share the same payment rail
+- Uploading additional files to an existing data set does NOT create new rails
+- Creating a new data set (with the same or different provider) creates a new rail
+
+**Example workflow:**
+
+```typescript
+// Option 1: Implicit data set creation
+const upload1 = await synapse.storage.upload(file1); // Creates data set + rail
+const upload2 = await synapse.storage.upload(file2); // May create new data set + rail
+
+// Option 2: Explicit data set creation
+const context = await synapse.storage.createContext({
+  providerId: 1,
+}); // Creates data set + rail here
+
+// Uploads to existing data set (reuses rail)
+const upload1 = await context.upload(file1);
+const upload2 = await context.upload(file2);
+```
+
+## Allowances and Operators
+
+Allowances control what operators can do with your funds:
+
+```typescript
+// Check current allowances
+const approval = await synapse.payments.serviceApproval(warmStorageAddr);
+
+console.log("Rate allowance:", approval.rateAllowance);
+console.log("Lockup allowance:", approval.lockupAllowance);
+console.log("Max period:", approval.maxLockupPeriod);
+```
+
+**Increasing allowances:**
+
+```typescript
+// Add 5 USDFC/epoch to rate allowance
+await synapse.payments.increaseServiceApproval(
+  warmStorageAddr,
+  ethers.parseUnits("5", 18), // Additional rate
+  ethers.parseUnits("0", 18), // Additional lockup
+  0n // No period change
+);
+```
+
+**Revoking an operator:**
+
+```typescript
+// Prevent new rails (existing rails continue)
+await synapse.payments.revokeService(warmStorageAddr);
+```
+
+Revoking prevents the operator from creating new rails but does not affect existing rails or locked funds.
+
+## Withdrawing Funds
+
+You can only withdraw available (unlocked) funds:
+
+```typescript
+const info = await synapse.payments.accountInfo();
+
+// Withdraw all available funds
+await synapse.payments.withdraw(info.availableFunds);
+```
+
+Funds locked in active payment rails cannot be withdrawn until rails terminate and settle.
+
+## When to Use Which Guide
+
+**Calculate storage costs and deposit funds:**
+→ [How to Calculate Storage Costs](/synapse-sdk/payments/storage-costs)
+
+Use this guide when:
+
+- Planning to upload new files
+- Wondering "How much will 200MiB for 1 year cost?"
+- Checking if you can afford new storage
+- Needing to top up your account
+
+**Monitor usage and automate top-ups:**
+→ [How to Monitor Your Storage Usage](/synapse-sdk/payments/storage-monitoring/)
+
+Use this guide when:
+
+- Setting up account monitoring
+- Implementing alert thresholds
+- Automating top-ups to maintain funding
+- Tracking your burn rate and costs
+
+**Troubleshoot errors:**
+→ [Troubleshooting](/synapse-sdk/payments/troubleshooting)
+
+Use this guide when:
+
+- Getting payment-related errors
+- Transactions failing
+- Needing quick error solutions
+- Debugging payment issues
+
+## Summary
+
+**Quick Setup:**
+
+1. Deposit USDFC with `depositWithPermitAndApproveOperator()`
+2. Upload data - data sets and rails created automatically as needed
+3. Monitor account and top up as needed
+
+**Key Methods:**
+
+- `accountInfo()` - Get account status
+- `depositWithPermit()` - Top up account (gas-efficient)
+- `getRailsAsPayer()` - View your payment rails
+- `serviceApproval()` - Check operator allowances
+- `withdraw()` - Withdraw available funds
+
+**Critical Actions:**
+
+- Monitor account regularly to avoid running out of funds
+- Maintain sufficient operator allowances for your usage
+- Keep at least 30-90 days of funding as a safety buffer
+
+## Next Steps
+
+- [**Calculate Storage Costs**](/synapse-sdk/payments/storage-costs) - Learn to calculate costs and deposit funds
+- [**Monitor Your Usage**](/synapse-sdk/payments/storage-monitoring/) - Set up monitoring and alerts
+- [**Start Uploading**](/synapse-sdk/storage/) - Upload files to storage
+- [**Technical Deep Dive**](/core-concepts/filecoin-pay-overview) - Understand the protocol

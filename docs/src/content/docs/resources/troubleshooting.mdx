@@ -1,0 +1,635 @@
+---
+title: Troubleshooting
+description: Common issues and solutions when working with Filecoin On-Chain Cloud.
+sidebar:
+  order: 8
+---
+
+This guide helps you diagnose and resolve common issues when working with the Filecoin On-Chain Cloud system.
+
+## Quick Diagnostics
+
+Before diving into specific issues, run these quick checks:
+
+### 1. Check Account Status
+
+```typescript
+const accountInfo = await synapse.payments.accountInfo();
+console.log("Total funds:", accountInfo.funds);
+console.log("Locked funds:", accountInfo.lockupCurrent);
+console.log("Available:", accountInfo.funds - accountInfo.lockupCurrent);
+console.log("Last settled:", accountInfo.lockupLastSettledAt);
+```
+
+### 2. Check Service Approval
+
+```typescript
+const warmStorageAddress = synapse.getWarmStorageAddress();
+const approval = await synapse.payments.serviceApproval(warmStorageAddress);
+console.log("Rate allowance:", approval.rateAllowance);
+console.log("Lockup allowance:", approval.lockupAllowance);
+console.log("Max lockup period:", approval.maxLockupPeriod);
+```
+
+### 3. Check Active Payment Rails
+
+```typescript
+const rails = await synapse.payments.getRailsAsPayer();
+console.log("Active rails:", rails.length);
+rails.forEach((rail) => {
+  console.log(`Rail ${rail.id}:`, {
+    payee: rail.payee,
+    rate: rail.paymentRate,
+    locked: rail.lockupPeriod,
+    settled: rail.settledUpTo,
+  });
+});
+```
+
+## Upload Issues
+
+### Upload Fails: "Insufficient funds"
+
+**Symptoms:**
+
+- Upload throws error about insufficient balance
+- Transaction reverts with `InsufficientBalance` error
+
+**Diagnosis:**
+
+```typescript
+const accountInfo = await synapse.payments.accountInfo();
+const available = accountInfo.funds - accountInfo.lockupCurrent;
+console.log("Available funds:", available);
+```
+
+**Solutions:**
+
+**Option 1: Deposit more funds**
+
+```typescript
+// Deposit additional USDFC
+const depositAmount = ethers.parseUnits("100", 18); // 100 USDFC
+await synapse.payments.deposit(depositAmount);
+```
+
+**Option 2: Wait for lockup to settle**
+
+```typescript
+// Check when locked funds will be available
+const rails = await synapse.payments.getRailsAsPayer();
+console.log("Funds locked in rails:", rails.length);
+// Consider terminating unused rails to free up lockup
+```
+
+**Root Cause:**
+
+- Not enough available balance (after lockup deduction)
+- First upload requires lockup amount (rate × lockup period)
+- Multiple rails compound lockup requirements
+
+---
+
+### Upload Fails: "Service not approved"
+
+**Symptoms:**
+
+- Error: `ServiceNotApproved` or `OperatorNotApproved`
+- Upload rejected before reaching provider
+
+**Diagnosis:**
+
+```typescript
+const warmStorageAddress = synapse.getWarmStorageAddress();
+const approval = await synapse.payments.serviceApproval(warmStorageAddress);
+if (approval.rateAllowance === 0n) {
+  console.log("WarmStorage not approved as operator");
+}
+```
+
+**Solution:**
+
+```typescript
+await synapse.payments.approveService(
+  warmStorageAddress,
+  ethers.parseUnits("10", 18), // Rate: 10 USDFC/epoch
+  ethers.parseUnits("50000", 18), // Lockup: 50,000 USDFC
+  2880n * 30n // Period: 30 days (2880 epochs/day)
+);
+```
+
+**Prevention:**
+Always approve WarmStorage before first upload:
+
+```typescript
+async function ensureServiceApproved() {
+  const warmStorageAddress = synapse.getWarmStorageAddress();
+  const approval = await synapse.payments.serviceApproval(warmStorageAddress);
+
+  if (approval.rateAllowance === 0n) {
+    await synapse.payments.approveService(/* ... */);
+  }
+}
+```
+
+---
+
+### Upload Fails: "Provider unavailable"
+
+**Symptoms:**
+
+- Connection timeout errors
+- HTTP 503 Service Unavailable
+- `ECONNREFUSED` errors
+
+**Diagnosis:**
+
+```typescript
+try {
+  const providerInfo = await context.getProviderInfo();
+  console.log("Provider status:", providerInfo);
+} catch (error) {
+  console.error("Provider unreachable:", error.message);
+}
+```
+
+**Solutions:**
+
+**Option 1: Retry with backoff**
+
+```typescript
+async function uploadWithRetry(data: Uint8Array, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await synapse.storage.upload(data);
+    } catch (error) {
+      if (i === maxRetries - 1) throw error;
+      await new Promise((resolve) =>
+        setTimeout(resolve, 1000 * Math.pow(2, i))
+      );
+    }
+  }
+}
+```
+
+**Option 2: Switch to different provider**
+
+```typescript
+// Create context with specific provider
+const alternativeContext = await synapse.storage.createContext({
+  providerId: alternativeProviderId,
+});
+await alternativeContext.upload(data);
+```
+
+**Root Causes:**
+
+- Provider node is temporarily offline
+- Network connectivity issues
+- Provider at capacity
+
+---
+
+### Upload Fails: "Signature validation failed"
+
+**Symptoms:**
+
+- Error: `InvalidSignature` or `SignatureVerificationFailed`
+- Transaction reverts in WarmStorage callback
+
+**Diagnosis:**
+
+```typescript
+// Check signer address matches account
+const signerAddress = await synapse.getSigner().getAddress();
+console.log("Signer address:", signerAddress);
+console.log("Expected to match account address");
+```
+
+**Solutions:**
+
+**Ensure correct signer:**
+
+```typescript
+// Signer must be the account owner
+const synapse = await Synapse.create({
+  signer: wallet, // Must match the account depositing funds
+  network: "calibration",
+});
+```
+
+**Root Cause:**
+
+- Using different wallet for SDK vs payments
+- Signer changed between operations
+- EIP-712 domain mismatch
+
+---
+
+## Download Issues
+
+### Download Fails: "Piece not found"
+
+**Symptoms:**
+
+- HTTP 404 Not Found
+- Error: `PieceNotFound`
+
+**Diagnosis:**
+
+```typescript
+// Check if piece exists in current context
+const hasPiece = await context.hasPiece(pieceCid);
+console.log("Has piece:", hasPiece);
+
+// Check piece status
+try {
+  const status = await context.pieceStatus(pieceCid);
+  console.log("Piece status:", status);
+} catch (error) {
+  console.error("Piece not in this data set");
+}
+```
+
+**Solutions:**
+
+**Option 1: Use auto-discovery**
+
+```typescript
+// StorageManager finds provider automatically
+const data = await synapse.storage.download(pieceCid);
+```
+
+**Option 2: Check all providers**
+
+```typescript
+// Search for piece across providers
+const providers = await getAvailableProviders();
+for (const provider of providers) {
+  const context = await synapse.storage.createContext({
+    providerId: provider.id,
+  });
+  if (await context.hasPiece(pieceCid)) {
+    return await context.download(pieceCid);
+  }
+}
+```
+
+**Root Causes:**
+
+- Piece uploaded to different provider
+- Using wrong PieceCID
+- Piece not yet propagated to provider
+
+---
+
+### Download Fails: "Piece verification failed"
+
+**Symptoms:**
+
+- Download completes but hash mismatch
+- Error: `PieceIntegrityCheckFailed`
+
+**Diagnosis:**
+
+```typescript
+// Verify piece CID matches expected
+console.log("Expected CID:", expectedPieceCid);
+console.log("Actual CID:", computedPieceCid);
+```
+
+**Solutions:**
+
+**Retry download:**
+
+```typescript
+// May be transient corruption
+const data = await synapse.storage.download(pieceCid);
+// SDK automatically verifies CID matches
+```
+
+**Root Causes:**
+
+- Network corruption during transfer
+- Provider storage corruption
+- Incorrect CID provided
+
+---
+
+## Payment Issues
+
+### Rail Creation Fails: "Exceeds allowance"
+
+**Symptoms:**
+
+- Error: `ExceedsRateAllowance` or `ExceedsLockupAllowance`
+- First upload fails with allowance error
+
+**Diagnosis:**
+
+```typescript
+const approval = await synapse.payments.serviceApproval(warmStorageAddress);
+console.log("Current allowances:", {
+  rateAllowance: approval.rateAllowance,
+  lockupAllowance: approval.lockupAllowance,
+  maxLockupPeriod: approval.maxLockupPeriod,
+});
+
+// Check what's being requested
+const storageInfo = await synapse.storage.getStorageInfo();
+console.log("Service pricing:", storageInfo.pricePerEpochPerByte);
+```
+
+**Solution:**
+
+```typescript
+// Increase allowances
+await synapse.payments.approveService(
+  warmStorageAddress,
+  ethers.parseUnits("50", 18), // Higher rate allowance
+  ethers.parseUnits("100000", 18), // Higher lockup allowance
+  2880n * 60n // Longer max period (60 days)
+);
+```
+
+**Root Cause:**
+
+- Allowances set too low for storage requirements
+- Multiple rails consuming allowances
+- Storage pricing increased since approval
+
+---
+
+### Settlement Fails: "No funds to settle"
+
+**Symptoms:**
+
+- Provider can't settle payment rail
+- Error: `InsufficientFundsForSettlement`
+
+**Diagnosis:**
+
+```typescript
+const accountInfo = await synapse.payments.accountInfo();
+const rail = await synapse.payments.getRail(railId);
+
+console.log("Account funds:", accountInfo.funds);
+console.log("Last settled epoch:", rail.settledUpTo);
+console.log("Lockup last settled:", accountInfo.lockupLastSettledAt);
+```
+
+**Solutions:**
+
+**Deposit more funds:**
+
+```typescript
+await synapse.payments.deposit(ethers.parseUnits("100", 18));
+```
+
+**Wait for lockup to activate:**
+
+```typescript
+// After rail termination, provider can settle from lockup
+// No action needed - lockup acts as safety hatch
+```
+
+**Root Causes:**
+
+- Client ran out of funds
+- Haven't deposited in a while
+- Payment rate too high for deposit frequency
+
+---
+
+## Proof Verification Issues
+
+### Proofs Failing Regularly
+
+**Symptoms:**
+
+- `nextProvingPeriod` callbacks with faults
+- Provider reporting proof failures
+
+**Diagnosis:**
+
+```typescript
+// Check data set proof status
+const metadata = await warmStorage.getDataSetMetadata(dataSetId);
+console.log("Data set metadata:", metadata);
+
+// Check if provider is still responding
+const providerInfo = await context.getProviderInfo();
+console.log("Provider health:", providerInfo);
+```
+
+**Solutions:**
+
+**Check provider health:**
+
+- Verify provider node is running
+- Check provider has disk space
+- Verify provider can access piece data
+
+**Check challenge timing:**
+
+- Ensure provider is monitoring challenges
+- Verify provider submits proofs within window
+
+**Root Causes:**
+
+- Provider node offline or misconfigured
+- Provider lost piece data
+- Network issues preventing proof submission
+
+---
+
+## Network and Connection Issues
+
+### Transaction Timeouts
+
+**Symptoms:**
+
+- Transactions never confirm
+- Timeout errors after 2+ minutes
+
+**Diagnosis:**
+
+```typescript
+// Check network status
+const provider = synapse.getProvider();
+const blockNumber = await provider.getBlockNumber();
+console.log("Current block:", blockNumber);
+
+// Check gas price
+const feeData = await provider.getFeeData();
+console.log("Gas price:", feeData.gasPrice);
+```
+
+**Solutions:**
+
+**Increase timeout:**
+
+```typescript
+// Custom provider with longer timeout
+const provider = new ethers.JsonRpcProvider(
+  rpcUrl,
+  {
+    name: "calibration",
+    chainId: 314159,
+  },
+  {
+    timeout: 120000, // 2 minutes
+  }
+);
+```
+
+**Check gas settings:**
+
+```typescript
+// Ensure sufficient gas
+const tx = await contract.someMethod({
+  gasLimit: 500000,
+  maxFeePerGas: ethers.parseUnits("2", "gwei"),
+});
+```
+
+**Root Causes:**
+
+- Network congestion
+- Gas price too low
+- RPC endpoint issues
+
+---
+
+### RPC Errors: "Rate limit exceeded"
+
+**Symptoms:**
+
+- HTTP 429 Too Many Requests
+- Intermittent connection failures
+
+**Solutions:**
+
+**Use rate limiting:**
+
+```typescript
+// Add delay between requests
+async function withRateLimit(fn: () => Promise<any>) {
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  return await fn();
+}
+```
+
+**Use different RPC endpoint:**
+
+```typescript
+const synapse = await Synapse.create({
+  signer: wallet,
+  network: "calibration",
+  providers: {
+    calibration: alternativeRpcUrl, // Use different RPC
+  },
+});
+```
+
+**Root Causes:**
+
+- Public RPC rate limits
+- Too many concurrent requests
+- Need dedicated RPC endpoint
+
+---
+
+## SDK Configuration Issues
+
+### "Network not supported"
+
+**Symptoms:**
+
+- Error: `UnsupportedNetwork`
+- SDK initialization fails
+
+**Diagnosis:**
+
+```typescript
+const network = await signer.provider.getNetwork();
+console.log("Chain ID:", network.chainId);
+console.log("Network name:", network.name);
+```
+
+**Solution:**
+
+```typescript
+// Use correct network parameter
+const synapse = await Synapse.create({
+  signer: wallet,
+  network: "calibration", // or 'mainnet'
+});
+
+// For custom networks:
+const synapse = await Synapse.create({
+  signer: wallet,
+  network: "calibration",
+  addresses: {
+    warmStorage: "0x...", // Custom deployment
+  },
+});
+```
+
+**Root Causes:**
+
+- Wrong network in wallet
+- Custom deployment without addresses
+- Testnet vs mainnet mismatch
+
+---
+
+## Getting More Help
+
+If these troubleshooting steps don't resolve your issue:
+
+### Enable Debug Logging
+
+```typescript
+// Enable verbose logging
+process.env.DEBUG = "synapse:*";
+
+// Or specific modules
+process.env.DEBUG = "synapse:storage,synapse:payments";
+```
+
+### Check Transaction Details
+
+```typescript
+// Get detailed transaction info
+const tx = await synapse.payments.deposit(amount);
+const receipt = await tx.wait();
+console.log("Transaction:", {
+  hash: receipt.hash,
+  blockNumber: receipt.blockNumber,
+  gasUsed: receipt.gasUsed,
+  status: receipt.status,
+});
+```
+
+### Verify Smart Contract State
+
+```typescript
+// Direct contract queries
+const warmStorage = synapse.storage.warmStorageService;
+const pricing = await warmStorage.getServicePrice();
+console.log("Service pricing:", pricing);
+```
+
+### Community Support
+
+- **GitHub Issues**: Report bugs at [filecoin-onchain-cloud/issues](https://github.com/filecoin-onchain-cloud)
+- **Discord**: Join the Filecoin community Discord
+- **Documentation**: Review [Developer Guides](/synapse-sdk/) for examples
+
+## Related Documentation
+
+- [**Synapse SDK**](/synapse-sdk/about) - SDK architecture and error handling
+- [**FilecoinPay Technical Overview**](/core-concepts/filecoin-pay-overview) - Payment system details
+- [**PDP Overview**](/core-concepts/pdp-overview) - Proof verification details
+- [**Glossary**](/core-concepts/glossary) - Key terms and definitions

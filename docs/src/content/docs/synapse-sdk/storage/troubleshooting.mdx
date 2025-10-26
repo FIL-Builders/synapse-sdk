@@ -1,0 +1,654 @@
+---
+title: Storage Troubleshooting
+description: Solutions to common storage issues with the Synapse SDK.
+sidebar:
+  order: 5
+---
+
+This guide helps you diagnose and resolve common issues when uploading, downloading, and managing storage with the Synapse SDK.
+
+## Upload Errors
+
+### Insufficient Funds
+
+**Error Messages:**
+
+- `"insufficient funds"`
+- `"InsufficientBalance"`
+- `"available funds too low"`
+
+**Cause:** Your Payments account doesn't have enough USDFC to cover the storage costs.
+
+**Solution:**
+
+```typescript
+// Check available balance
+const accountInfo = await synapse.payments.accountInfo();
+const available = accountInfo.currentFunds - accountInfo.lockupCurrent;
+console.log("Available USDFC:", ethers.formatUnits(available, 18));
+
+// Deposit more funds
+const depositAmount = ethers.parseUnits("100", 18);
+await synapse.payments.deposit(TOKENS.USDFC, depositAmount);
+```
+
+**Learn More:** [How to Top Up Balance](/synapse-sdk/payments/storage-monitoring)
+
+### Operator Not Approved
+
+**Error Messages:**
+
+- `"operator not approved"`
+- `"ServiceNotApproved"`
+- `"requires service approval"`
+
+**Cause:** WarmStorage contract needs approval to create payment rails on your behalf.
+
+**Solution:**
+
+```typescript
+const warmStorageAddress = synapse.getWarmStorageAddress();
+
+await synapse.payments.approveService(
+  warmStorageAddress,
+  ethers.parseUnits("10", 18), // Rate: 10 USDFC/epoch
+  ethers.parseUnits("50000", 18), // Lockup: 50,000 USDFC
+  2880n * 30n // Period: 30 days
+);
+```
+
+**Learn More:** [Payment Setup](/synapse-sdk/payments/)
+
+### File Size Out of Range
+
+**Error Messages:**
+
+- `"file too small"`
+- `"file too large"`
+- `"invalid piece size"`
+
+**Cause:** Files must be between 127 bytes and 254 MiB.
+
+**Solution:**
+
+```typescript
+const MIN_SIZE = 127;
+const MAX_SIZE = 266338304; // 254 MiB
+
+if (fileData.length < MIN_SIZE) {
+  console.error("File too small. Minimum: 127 bytes");
+} else if (fileData.length > MAX_SIZE) {
+  console.error("File too large. Maximum: 254 MiB");
+  // Consider splitting the file
+}
+```
+
+### Provider Unavailable
+
+**Error Messages:**
+
+- `"provider unavailable"`
+- `"provider timeout"`
+- `"ECONNREFUSED"`
+- `"no active providers"`
+
+**Cause:** Storage provider is offline or unreachable.
+
+**Solution:**
+
+```typescript
+// Option 1: Retry with exponential backoff
+async function uploadWithRetry(data, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await synapse.storage.upload(data);
+    } catch (error) {
+      if (i === maxRetries - 1) throw error;
+      const waitTime = Math.pow(2, i) * 1000;
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
+    }
+  }
+}
+
+// Option 2: Try different provider
+const providers = await synapse.storage.getStorageInfo().providers;
+const activeProviders = providers.filter((p) => p.active);
+
+for (const provider of activeProviders) {
+  try {
+    const context = await synapse.storage.createContext({
+      providerId: provider.id,
+    });
+    return await context.upload(data);
+  } catch (error) {
+    console.log(`Provider ${provider.id} failed, trying next...`);
+  }
+}
+```
+
+### Metadata Validation Failed
+
+**Error Messages:**
+
+- `"metadata exceeds limits"`
+- `"too many metadata keys"`
+- `"metadata key too long"`
+
+**Cause:** Metadata constraints violated.
+
+**Constraints:**
+
+- Data sets: Max 10 keys
+- Pieces: Max 5 keys per piece
+- Keys: Max 32 characters
+- Values: Max 128 characters
+
+**Solution:**
+
+```typescript
+function validateMetadata(metadata, maxKeys) {
+  const keys = Object.keys(metadata);
+
+  if (keys.length > maxKeys) {
+    throw new Error(`Too many keys. Max: ${maxKeys}`);
+  }
+
+  for (const [key, value] of Object.entries(metadata)) {
+    if (key.length > 32) {
+      throw new Error(`Key too long: "${key}". Max: 32 chars`);
+    }
+    if (value.length > 128) {
+      throw new Error(`Value too long for key "${key}". Max: 128 chars`);
+    }
+  }
+}
+
+// Validate before upload
+validateMetadata(pieceMetadata, 5);
+await context.upload(data, { metadata: pieceMetadata });
+```
+
+### Transaction Failed
+
+**Error Messages:**
+
+- `"transaction reverted"`
+- `"CALL_EXCEPTION"`
+- `"execution reverted"`
+
+**Cause:** On-chain transaction failed, often due to insufficient gas or invalid state.
+
+**Solution:**
+
+```typescript
+try {
+  const result = await synapse.storage.upload(data);
+} catch (error) {
+  if (error.code === "CALL_EXCEPTION") {
+    console.error("Transaction reverted:", error.reason);
+
+    // Check common causes
+    const accountInfo = await synapse.payments.accountInfo();
+    console.log("Balance:", ethers.formatUnits(accountInfo.currentFunds, 18));
+
+    const warmStorage = synapse.getWarmStorageAddress();
+    const approval = await synapse.payments.serviceApproval(warmStorage);
+    console.log(
+      "Rate allowance:",
+      ethers.formatUnits(approval.rateAllowance, 18)
+    );
+    console.log(
+      "Lockup allowance:",
+      ethers.formatUnits(approval.lockupAllowance, 18)
+    );
+  }
+}
+```
+
+## Download Errors
+
+### Piece Not Found
+
+**Error Messages:**
+
+- `"piece not found"`
+- `"404 not found"`
+- `"piece does not exist"`
+
+**Cause:** PieceCID doesn't exist on any provider, or incorrect CID provided.
+
+**Solution:**
+
+```typescript
+// 1. Verify PieceCID format
+if (!pieceCid.startsWith("bafkzcib")) {
+  console.error("Invalid PieceCID format");
+}
+
+// 2. Check if you uploaded this piece
+const storageInfo = await synapse.storage.getStorageInfo();
+const providers = storageInfo.providers;
+
+for (const provider of providers) {
+  try {
+    const context = await synapse.storage.createContext({
+      providerId: provider.id,
+    });
+    const hasPiece = await context.hasPiece(pieceCid);
+    if (hasPiece) {
+      console.log(`Found on provider ${provider.id}`);
+      return await context.download(pieceCid);
+    }
+  } catch (error) {
+    continue;
+  }
+}
+
+console.error("Piece not found on any provider");
+```
+
+### Provider Timeout
+
+**Error Messages:**
+
+- `"timeout"`
+- `"ETIMEDOUT"`
+- `"request timed out"`
+
+**Cause:** Provider not responding in time, often due to network issues or large files.
+
+**Solution:**
+
+```typescript
+// Implement retry with exponential backoff
+async function downloadWithRetry(pieceCid, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      console.log(`Download attempt ${i + 1}/${maxRetries}`);
+      return await synapse.storage.download(pieceCid);
+    } catch (error) {
+      if (
+        !error.message.includes("timeout") &&
+        !error.message.includes("ETIMEDOUT")
+      ) {
+        throw error; // Not a timeout, don't retry
+      }
+
+      if (i === maxRetries - 1) throw error;
+
+      const waitTime = Math.pow(2, i) * 1000;
+      console.log(`Waiting ${waitTime / 1000}s before retry...`);
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
+    }
+  }
+}
+
+const data = await downloadWithRetry(pieceCid);
+```
+
+### Data Mismatch
+
+**Error Messages:**
+
+- `"checksum mismatch"`
+- `"data corrupted"`
+- `"verification failed"`
+
+**Cause:** Downloaded data doesn't match expected content.
+
+**Solution:**
+
+```typescript
+import { createHash } from "crypto";
+import { calculate } from "@filoz/synapse-sdk/piece";
+
+// Verify data integrity
+const data = await synapse.storage.download(pieceCid);
+
+// Calculate PieceCID from downloaded data
+const calculatedCid = calculate(data);
+
+if (calculatedCid.toString() !== pieceCid.toString()) {
+  console.error("Data corrupted! PieceCID mismatch");
+  console.error("Expected:", pieceCid.toString());
+  console.error("Got:", calculatedCid.toString());
+
+  // Retry download
+  const retryData = await synapse.storage.download(pieceCid);
+  // Verify again...
+} else {
+  console.log("Data integrity verified ✓");
+}
+```
+
+## Data Set Errors
+
+### No Active Providers
+
+**Error Messages:**
+
+- `"no active providers available"`
+- `"all providers offline"`
+
+**Cause:** No storage providers are currently active on the network.
+
+**Solution:**
+
+```typescript
+// Check provider status
+const storageInfo = await synapse.storage.getStorageInfo();
+const activeCount = storageInfo.providers.filter((p) => p.active).length;
+
+console.log(`Active providers: ${activeCount}/${storageInfo.providers.length}`);
+
+if (activeCount === 0) {
+  console.error("No active providers. Try again later or contact support.");
+} else {
+  // List active providers
+  storageInfo.providers
+    .filter((p) => p.active)
+    .forEach((p) => {
+      console.log(`Provider ${p.id}: ${p.address}`);
+      console.log(`  Price: ${ethers.formatUnits(p.pricePerEpochPerByte, 18)}`);
+    });
+}
+```
+
+### Invalid Data Set ID
+
+**Error Messages:**
+
+- `"data set not found"`
+- `"invalid data set id"`
+
+**Cause:** Data set doesn't exist or you don't have access.
+
+**Solution:**
+
+```typescript
+// List your data sets
+const dataSets = await synapse.storage.findDataSets();
+
+console.log(`Found ${dataSets.length} data sets:`);
+dataSets.forEach((ds) => {
+  console.log(`  ID: ${ds.dataSetId}`);
+  console.log(`  Provider: ${ds.serviceProvider}`);
+  console.log(`  Pieces: ${ds.pieceCount}`);
+});
+
+// Use valid data set ID
+if (dataSets.length > 0) {
+  const context = await synapse.storage.createContext({
+    dataSetId: dataSets[0].dataSetId,
+    serviceProvider: dataSets[0].serviceProvider,
+  });
+}
+```
+
+## Network Errors
+
+### RPC Connection Failed
+
+**Error Messages:**
+
+- `"network error"`
+- `"could not detect network"`
+- `"connection refused"`
+
+**Cause:** RPC endpoint is unavailable or network issues.
+
+**Solution:**
+
+```typescript
+// Test RPC connection
+try {
+  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+  const network = await provider.getNetwork();
+  console.log("Connected to network:", network.name, network.chainId);
+} catch (error) {
+  console.error("RPC connection failed:", error.message);
+  console.error("Check RPC_URL environment variable");
+}
+
+// Try alternative RPC endpoints
+const RPC_ENDPOINTS = [
+  "https://api.calibration.node.glif.io/rpc/v1",
+  "https://api.calibration.node.glif.io/rpc/v1", // Add backups
+];
+
+for (const rpcUrl of RPC_ENDPOINTS) {
+  try {
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    await provider.getNetwork();
+    console.log("Connected to:", rpcUrl);
+    break;
+  } catch (error) {
+    console.log("Failed:", rpcUrl);
+  }
+}
+```
+
+### Rate Limiting
+
+**Error Messages:**
+
+- `"429 Too Many Requests"`
+- `"rate limit exceeded"`
+
+**Cause:** Too many requests to RPC or provider API.
+
+**Solution:**
+
+```typescript
+// Implement rate limiting with delays
+async function uploadBatch(files, delayMs = 1000) {
+  const results = [];
+
+  for (const file of files) {
+    try {
+      const result = await synapse.storage.upload(file);
+      results.push({ success: true, result });
+    } catch (error) {
+      if (error.message.includes("429")) {
+        console.log("Rate limited, waiting longer...");
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        // Retry this file
+        const retry = await synapse.storage.upload(file);
+        results.push({ success: true, result: retry });
+      } else {
+        results.push({ success: false, error: error.message });
+      }
+    }
+
+    // Delay between uploads
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+
+  return results;
+}
+```
+
+## General Debugging
+
+### Enable Verbose Logging
+
+```typescript
+// Log all operations
+const synapse = await Synapse.create({
+  privateKey: process.env.PRIVATE_KEY,
+  rpcURL: process.env.RPC_URL,
+  // Note: SDK doesn't have built-in verbose mode yet
+  // Add manual logging to callbacks
+});
+
+const context = await synapse.storage.createContext({
+  callbacks: {
+    onProviderSelected: (info) => {
+      console.log("[DEBUG] Provider selected:", JSON.stringify(info, null, 2));
+    },
+    onDataSetCreationStarted: (txHash) => {
+      console.log("[DEBUG] Dataset creation tx:", txHash);
+    },
+    onDataSetCreationProgress: (progress) => {
+      console.log(
+        "[DEBUG] Dataset progress:",
+        JSON.stringify(progress, null, 2)
+      );
+    },
+    onDataSetResolved: (info) => {
+      console.log("[DEBUG] Dataset resolved:", JSON.stringify(info, null, 2));
+    },
+  },
+});
+```
+
+### Check SDK Version
+
+```typescript
+// Ensure you're using latest SDK version
+import { version } from "@filoz/synapse-sdk/package.json";
+console.log("Synapse SDK version:", version);
+
+// Update if needed:
+// npm install @filoz/synapse-sdk@latest
+```
+
+### Health Check Script
+
+```typescript
+async function healthCheck() {
+  console.log("=== Synapse SDK Health Check ===\n");
+
+  try {
+    // 1. RPC connection
+    const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+    const network = await provider.getNetwork();
+    console.log("✓ RPC connection:", network.name);
+
+    // 2. SDK initialization
+    const synapse = await Synapse.create({
+      privateKey: process.env.PRIVATE_KEY,
+      rpcURL: process.env.RPC_URL,
+    });
+    console.log("✓ SDK initialized");
+
+    // 3. Account balance
+    const accountInfo = await synapse.payments.accountInfo();
+    console.log(
+      "✓ Account balance:",
+      ethers.formatUnits(accountInfo.currentFunds, 18),
+      "USDFC"
+    );
+
+    // 4. Provider availability
+    const storageInfo = await synapse.storage.getStorageInfo();
+    const activeCount = storageInfo.providers.filter((p) => p.active).length;
+    console.log(
+      `✓ Active providers: ${activeCount}/${storageInfo.providers.length}`
+    );
+
+    // 5. Service approval
+    const warmStorage = synapse.getWarmStorageAddress();
+    const approval = await synapse.payments.serviceApproval(warmStorage);
+    console.log(
+      "✓ Rate allowance:",
+      ethers.formatUnits(approval.rateAllowance, 18),
+      "USDFC/epoch"
+    );
+    console.log(
+      "✓ Lockup allowance:",
+      ethers.formatUnits(approval.lockupAllowance, 18),
+      "USDFC"
+    );
+
+    console.log("\n✓ All checks passed!");
+  } catch (error) {
+    console.error("\n✗ Health check failed:", error.message);
+  }
+}
+
+healthCheck();
+```
+
+## Common Patterns
+
+### Retry with Exponential Backoff
+
+```typescript
+async function retryWithBackoff(fn, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      const isLastAttempt = i === maxRetries - 1;
+      const isRetryable =
+        error.message.includes("timeout") ||
+        error.message.includes("network") ||
+        error.message.includes("429");
+
+      if (!isRetryable || isLastAttempt) {
+        throw error;
+      }
+
+      const waitTime = Math.pow(2, i) * 1000;
+      console.log(`Attempt ${i + 1} failed, waiting ${waitTime / 1000}s...`);
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
+    }
+  }
+}
+
+// Usage
+const result = await retryWithBackoff(() => synapse.storage.upload(data));
+```
+
+### Graceful Error Handling
+
+```typescript
+async function safeUpload(data, metadata) {
+  try {
+    // Preflight checks
+    const accountInfo = await synapse.payments.accountInfo();
+    const available = accountInfo.currentFunds - accountInfo.lockupCurrent;
+
+    if (available < ethers.parseUnits("10", 18)) {
+      throw new Error("Insufficient funds: Please top up before uploading");
+    }
+
+    // Attempt upload
+    const result = await synapse.storage.upload(data, { metadata });
+
+    console.log("✓ Upload successful:", result.pieceCid);
+    return { success: true, pieceCid: result.pieceCid };
+  } catch (error) {
+    console.error("✗ Upload failed:", error.message);
+
+    // Return structured error
+    return {
+      success: false,
+      error: error.message,
+      code: error.code,
+      recoverable:
+        error.message.includes("timeout") || error.message.includes("network"),
+    };
+  }
+}
+```
+
+## Getting Help
+
+If you can't resolve your issue:
+
+1. **Check SDK Version**: Ensure you're running the latest version
+2. **Review Logs**: Enable verbose logging and check for error details
+3. **Run Health Check**: Use the health check script above
+4. **Consult API Docs**: Review [API Reference](/api/) for detailed method documentation
+5. **Community Support**:
+   - GitHub Issues: [Report a bug](https://github.com/FilOzone/synapse-sdk/issues)
+   - Filecoin Slack: Get help from the community
+
+## Related Guides
+
+- [**Upload Files**](/synapse-sdk/storage/upload) - Upload guide
+- [**Retrieve Files**](/synapse-sdk/storage/retrieve) - Download guide
+- [**Payment Setup**](/synapse-sdk/payments/) - Payment configuration
+- [**Core Troubleshooting**](/core-concepts/troubleshooting) - General platform issues

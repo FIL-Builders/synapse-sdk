@@ -1,107 +1,107 @@
-import starlight from '@astrojs/starlight'
-import { docsPlugin } from '@hugomrdias/docs/starlight-typedoc'
-import { defineConfig } from 'astro/config'
-import ecTwoSlash from 'expressive-code-twoslash'
-import starlightLlmsTxt from 'starlight-llms-txt'
-import viteTsconfigPaths from 'vite-tsconfig-paths'
+import starlight from "@astrojs/starlight";
+import { docsPlugin } from "@hugomrdias/docs/starlight-typedoc";
+import { defineConfig } from "astro/config";
+import ecTwoSlash from "expressive-code-twoslash";
+import starlightLlmsTxt from "starlight-llms-txt";
+import viteTsconfigPaths from "vite-tsconfig-paths";
+import mermaid from "astro-mermaid";
 
-const site = 'https://synapse.filecoin.services'
+const site = "https://synapse.filecoin.services";
 
 // https://astro.build/config
 export default defineConfig({
   site,
-  base: '/',
+  base: "/",
   vite: {
     plugins: [viteTsconfigPaths()],
   },
   integrations: [
+    mermaid({
+      theme: "forest",
+      autoTheme: true,
+    }),
     starlight({
-      title: 'Filecoin Onchain Cloud',
-      logo: { src: './src/assets/foc-logo.svg', alt: 'synapse' },
-      favicon: 'favicon.ico',
-      customCss: ['./src/custom.css'],
+      title: "Filecoin Onchain Cloud",
+      logo: { src: "./src/assets/foc-logo.svg", alt: "synapse" },
+      favicon: "favicon.ico",
+      customCss: ["./src/custom.css"],
       head: [
         {
-          tag: 'link',
+          tag: "link",
           attrs: {
-            rel: 'icon',
-            type: 'image/svg+xml',
-            href: '/favicon.svg',
+            rel: "icon",
+            type: "image/svg+xml",
+            href: "/favicon.svg",
           },
         },
         {
-          tag: 'link',
+          tag: "link",
           attrs: {
-            rel: 'icon',
-            type: 'image/png',
-            href: '/favicon-96x96.png',
-            sizes: '96x96',
+            rel: "icon",
+            type: "image/png",
+            href: "/favicon-96x96.png",
+            sizes: "96x96",
           },
         },
         {
-          tag: 'link',
+          tag: "link",
           attrs: {
-            rel: 'apple-touch-icon',
-            href: '/apple-touch-icon.png',
-            sizes: '180x180',
+            rel: "apple-touch-icon",
+            href: "/apple-touch-icon.png",
+            sizes: "180x180",
           },
         },
         {
-          tag: 'link',
+          tag: "link",
           attrs: {
-            rel: 'manifest',
-            href: '/site.webmanifest',
+            rel: "manifest",
+            href: "/site.webmanifest",
           },
         },
         {
-          tag: 'meta',
+          tag: "meta",
           attrs: {
-            property: 'og:image',
-            content: new URL('og.jpg?v=1', site).href,
+            property: "og:image",
+            content: new URL("og.jpg?v=1", site).href,
           },
         },
       ],
       social: [
         {
-          icon: 'github',
-          label: 'Github',
-          href: 'https://github.com/FilOzone/synapse-sdk',
+          icon: "github",
+          label: "Github",
+          href: "https://github.com/FilOzone/synapse-sdk",
         },
         {
-          icon: 'x.com',
-          label: 'X',
-          href: 'https://x.com/_FilOz',
+          icon: "x.com",
+          label: "X",
+          href: "https://x.com/_FilOz",
         },
       ],
       editLink: {
-        baseUrl: 'https://github.com/FilOzone/synapse-sdk/edit/main/docs/',
+        baseUrl: "https://github.com/FilOzone/synapse-sdk/edit/main/docs/",
       },
       lastUpdated: true,
       sidebar: [
         {
-          label: 'Introduction',
-          autogenerate: { directory: 'introduction' },
+          label: "Introduction",
+          autogenerate: { directory: "introduction" },
         },
         {
-          label: 'Getting Started',
-          autogenerate: { directory: 'getting-started' },
+          label: "Getting Started",
+          autogenerate: { directory: "getting-started" },
         },
         {
-          label: 'Core Concepts',
-          autogenerate: { directory: 'core-concepts' },
+          label: "Core Concepts",
+          autogenerate: { directory: "core-concepts" },
         },
         {
-          label: 'Developers',
-          autogenerate: { directory: 'developers' },
+          label: "Synapse SDK Guides",
+          autogenerate: { directory: "synapse-sdk" },
         },
         {
-          label: 'API',
-          collapsed: true,
-          autogenerate: { directory: 'api' },
-        },
-        {
-          label: 'Resources',
-          autogenerate: { directory: 'resources' },
+          label: "Resources",
+          autogenerate: { directory: "resources" },
         },
       ],
       expressiveCode: {
@@ -110,7 +110,7 @@ export default defineConfig({
             twoslashOptions: {
               compilerOptions: {
                 allowUmdGlobalAccess: true,
-                lib: ['ESNext', 'DOM', 'DOM.Iterable'],
+                lib: ["ESNext", "DOM", "DOM.Iterable"],
               },
             },
           }),
@@ -121,18 +121,21 @@ export default defineConfig({
           pagination: true,
           typeDocOptions: {
             githubPages: true,
-            entryPointStrategy: 'packages',
-            entryPoints: ['../packages/*'],
-            tsconfig: '../tsconfig.json',
+            entryPointStrategy: "packages",
+            entryPoints: ["../packages/*"],
+            tsconfig: "../tsconfig.json",
             useCodeBlocks: true,
-            parametersFormat: 'table',
-            indexFormat: 'table',
-            groupOrder: ['classes', 'functions', 'variables', 'types', '*'],
-            plugin: ['typedoc-plugin-mdn-links', 'typedoc-plugin-missing-exports'],
+            parametersFormat: "table",
+            indexFormat: "table",
+            groupOrder: ["classes", "functions", "variables", "types", "*"],
+            plugin: [
+              "typedoc-plugin-mdn-links",
+              "typedoc-plugin-missing-exports",
+            ],
           },
         }),
         starlightLlmsTxt(),
       ],
     }),
   ],
-})
+});

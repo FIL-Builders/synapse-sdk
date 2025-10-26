@@ -1,0 +1,305 @@
+---
+title: Storage Operations
+description: Learn how to store and retrieve data using the Synapse SDK.
+sidebar:
+  order: 0
+---
+
+The Synapse SDK provides a simple, powerful API for storing and retrieving data on Filecoin. This guide explains the core concepts and helps you choose the right approach for your application.
+
+## Storage Approaches
+
+The SDK offers two ways to work with storage:
+
+**Auto-Managed (Recommended for Most Apps)**
+
+- SDK handles provider selection automatically
+- Creates and reuses data sets as needed
+- Minimal configuration required
+- Best for: Simple applications, quick prototyping, flexible provider usage
+
+**Explicit Control (Advanced)**
+
+- You choose specific providers
+- Manual data set management
+- Full visibility into operations
+- Best for: Production apps, cost optimization, specific provider requirements, batch operations
+
+## Core Concepts
+
+### StorageManager
+
+The high-level storage API accessed via `synapse.storage`. Handles provider selection, data set management, and provides SP-agnostic downloads.
+
+```typescript
+// Auto-managed operations
+await synapse.storage.upload(data);
+await synapse.storage.download(pieceCid);
+```
+
+### StorageContext
+
+Represents a connection to a specific storage provider and data set. Created explicitly for fine-grained control or automatically by StorageManager.
+
+```typescript
+// Explicit context
+const context = await synapse.storage.createContext({ providerId: 5 });
+await context.upload(data);
+```
+
+### PieceCID
+
+Content-addressed identifier for your data (format: `bafkzcib...`). Automatically calculated during upload and used to retrieve data from any provider.
+
+### Data Set
+
+A logical container of pieces stored with one provider. When a data set is created, a payment rail is established with that provider. All pieces in the data set share this single payment rail and are verified together via PDP proofs.
+
+**Key relationship**: One data set = One payment rail = One storage provider
+
+### Metadata
+
+Optional key-value pairs for organization:
+
+- **Data Set Metadata**: Max 10 keys (e.g., `project`, `environment`)
+- **Piece Metadata**: Max 5 keys per piece (e.g., `filename`, `contentType`)
+
+## Quick Start
+
+```typescript
+import { Synapse } from "@filoz/synapse-sdk";
+
+const synapse = await Synapse.create({ privateKey, rpcURL });
+
+// Upload
+const result = await synapse.storage.upload(
+  new TextEncoder().encode("Hello Filecoin!")
+);
+console.log("PieceCID:", result.pieceCid);
+
+// Download
+const data = await synapse.storage.download(result.pieceCid);
+console.log("Retrieved:", new TextDecoder().decode(data));
+```
+
+## When to Use What
+
+| Scenario                       | Approach         | Why                                   |
+| ------------------------------ | ---------------- | ------------------------------------- |
+| Simple file upload             | Auto-managed     | No configuration needed               |
+| Production app with monitoring | Explicit control | Progress tracking, specific providers |
+| Batch uploads                  | Explicit control | Reuse context for efficiency          |
+| Cost-sensitive                 | Explicit control | Choose cheapest provider              |
+| Quick prototype                | Auto-managed     | Fastest to implement                  |
+| Multi-provider strategy        | Explicit control | Provider selection logic              |
+
+## Upload Operations
+
+Uploading stores data on Filecoin and returns a PieceCID for retrieval.
+
+**What Happens:**
+
+1. SDK calculates PieceCID from your data
+2. Creates or reuses a data set (with payment rail establishment on creation)
+3. Uploads data to storage provider via HTTP
+4. Provider stores piece and submits on-chain transaction
+5. Returns PieceCID and transaction hash
+
+**Note**: Payment rails are created when data sets are created, not during individual uploads. If no data set is specified, the SDK creates one implicitly (establishing the rail). Subsequent uploads can reuse existing data sets and their rails.
+
+**Learn More:**
+
+- [How to Upload a File](/synapse-sdk/storage/upload) - Complete guide with examples
+- [Upload API Reference](/api/synapse/classes/storagemanager#upload) - Detailed API documentation
+
+## Download Operations
+
+Downloading retrieves data using its PieceCID from any provider that stores it.
+
+**What Happens:**
+
+1. SDK queries provider network for piece location
+2. Finds provider with the piece
+3. Downloads data via HTTP (or CDN if enabled)
+4. Returns raw data as `Uint8Array`
+
+**Learn More:**
+
+- [How to Retrieve a File](/synapse-sdk/storage/retrieve) - Complete guide with examples
+- [Download API Reference](/api/synapse/classes/storagemanager#download) - Detailed API documentation
+
+## Data Set Management
+
+Data sets are automatically created during your first upload to a provider. For explicit management:
+
+**When You Need Explicit Data Sets:**
+
+- Uploading many files to same provider
+- Want consistent provider for your application
+- Need to track costs per data set
+- Building batch upload workflows
+
+**Learn More:**
+
+- [How to Create a Dataset](/synapse-sdk/storage/create-dataset) - Data set management guide
+
+## Cost Estimation
+
+Storage costs are calculated based on file size, storage duration, and provider pricing.
+
+**Basic Formula:**
+
+```
+Cost per epoch = fileSize (bytes) × pricePerByte
+Total cost = costPerEpoch × epochs
+Epochs = days × 2,880 (30-second epochs per day)
+```
+
+**Example** (1 MB for 30 days at 0.000001 USDFC/byte/epoch):
+
+- Cost per epoch: 1.048576 USDFC
+- Total cost: ~90,597 USDFC
+
+**Preflight Checks:**
+The SDK provides preflight methods to estimate costs before uploading. See the [Upload Guide](/synapse-sdk/storage/upload#preflight-check) for details.
+
+## Size Limits
+
+- **Minimum**: 127 bytes (PieceCID calculation requirement)
+- **Maximum**: 254 MiB (266,338,304 bytes)
+
+Files outside these bounds will fail to upload.
+
+## Common Workflows
+
+### Simple Application
+
+```typescript
+// Setup once
+const synapse = await Synapse.create({ privateKey, rpcURL });
+
+// Upload files
+for (const file of files) {
+  const data = new Uint8Array(await file.arrayBuffer());
+  const result = await synapse.storage.upload(data, {
+    metadata: { filename: file.name },
+  });
+  console.log("Uploaded:", result.pieceCid);
+}
+```
+
+### Production with Progress
+
+```typescript
+const context = await synapse.storage.createContext({
+  callbacks: {
+    onProviderSelected: (info) => console.log("Provider:", info.id),
+    onDataSetResolved: (info) => console.log("Dataset:", info.dataSetId),
+  },
+});
+
+const result = await context.upload(data, {
+  onUploadComplete: (cid) => console.log("Complete:", cid),
+  onPieceConfirmed: () => console.log("Confirmed on-chain"),
+});
+```
+
+### Batch Upload
+
+```typescript
+const context = await synapse.storage.createContext({ providerId: 5 });
+
+const results = await Promise.all(
+  files.map((file) =>
+    context.upload(file, { metadata: { filename: file.name } })
+  )
+);
+```
+
+## Error Handling
+
+Common errors and their typical causes:
+
+| Error                 | Likely Cause               | Next Step                                                  |
+| --------------------- | -------------------------- | ---------------------------------------------------------- |
+| Insufficient funds    | Low USDFC balance          | [Top up balance](/synapse-sdk/payments/storage-monitoring) |
+| Operator not approved | WarmStorage needs approval | Call `approveService()`                                    |
+| Provider unavailable  | Provider offline           | Retry or select different provider                         |
+| Piece not found       | Invalid PieceCID           | Verify PieceCID from upload result                         |
+| Data too large        | File exceeds 254 MiB       | Split file or reduce size                                  |
+
+For comprehensive troubleshooting, see [Storage Troubleshooting](/synapse-sdk/storage/troubleshooting).
+
+## Best Practices
+
+**For Uploads:**
+
+- Check account balance before uploading
+- Use explicit contexts for batch operations
+- Add meaningful metadata for discoverability
+- Reuse storage contexts when uploading multiple files
+
+**For Downloads:**
+
+- Enable CDN for frequently accessed data
+- Cache PieceCIDs for your application
+- Implement retry logic for resilience
+- Use context-specific downloads when you know the provider
+
+**For Data Sets:**
+
+- List existing data sets before creating new ones
+- Reuse data sets for related content
+- Choose providers based on your needs (cost, location, features)
+- Monitor payment rails and settlements
+
+## Next Steps
+
+### How-To Guides
+
+Start with these task-focused guides:
+
+- [**Upload a File**](/synapse-sdk/storage/upload) - Step-by-step upload instructions
+- [**Retrieve a File**](/synapse-sdk/storage/retrieve) - Download patterns and optimization
+- [**Create a Dataset**](/synapse-sdk/storage/create-dataset) - Explicit data set management
+- [**Troubleshooting**](/synapse-sdk/storage/troubleshooting) - Common issues and solutions
+
+### Related Topics
+
+- [**Payment Management**](/synapse-sdk/payments/) - Managing deposits and approvals
+- [**Usage Monitoring**](/synapse-sdk/payments/storage-monitoring/) - Track costs and bandwidth
+- [**Network Configuration**](/synapse-sdk/network-configuration/) - Mainnet vs calibration
+
+### Deep Dives
+
+- [**Architecture**](/core-concepts/architecture) - How storage integrates with PDP and payments
+- [**PDP Overview**](/core-concepts/pdp-overview) - Understanding proof verification
+- [**Warm Storage Service**](/core-concepts/fwss-overview) - Service layer details
+
+### API Reference
+
+- [**StorageManager**](/api/synapse/classes/storagemanager) - High-level storage API
+- [**StorageContext**](/api/synapse/classes/storagecontext) - Provider-specific operations
+- [**Synapse**](/api/synapse/classes/synapse) - Main SDK class
+
+## Summary
+
+**Two Approaches:**
+
+- Auto-managed: Simple, automatic provider selection
+- Explicit control: Fine-grained control over providers and data sets
+
+**Core Operations:**
+
+- Upload: Store data, get PieceCID
+- Download: Retrieve data by PieceCID
+- Data sets: Manage collections of pieces
+
+**Key Points:**
+
+- PieceCID uniquely identifies your data
+- Data sets group pieces for verification and payments
+- Metadata helps organize and discover data
+- SDK handles all blockchain complexity
+
+Ready to start storing data? Head to [Upload a File](/synapse-sdk/storage/upload)!

@@ -1,0 +1,529 @@
+---
+title: How to Create a Dataset
+description: How to Create a Dataset using the Synapse SDK.
+sidebar:
+  order: 1
+---
+
+This guide explains how to create and manage data sets in Filecoin On-Chain Cloud storage using the Synapse SDK. Learn when to use explicit data set management, how to discover and select providers, and how to work with data sets using Node.js and Ethers.js.
+
+For an overview of what data sets are and their key properties, see [Storage Overview - Data Sets](/synapse-sdk/storage/#data-sets).
+
+## When Do You Need to Create a Data Set?
+
+### Auto-Managed (Default)
+
+The SDK creates data sets automatically when you upload:
+
+```javascript
+// SDK auto-creates data set
+const result = await synapse.storage.upload(fileData);
+// Result includes: dataSetId, railId, provider
+```
+
+**When to use**:
+
+- Simple uploads
+- Don't care about provider selection
+- Want SDK to handle everything
+
+### Explicit Management
+
+Create data sets explicitly when you need:
+
+- **Control provider selection** - Choose specific provider
+- **Reuse same provider** - Multiple uploads to same provider
+- **Preflight checks** - Estimate costs before uploading
+- **Batch operations** - Upload many files efficiently
+- **Monitor data sets** - Track pieces in each data set
+
+## Prerequisites
+
+Before creating data sets:
+
+1. **Synapse SDK installed**:
+
+```bash
+npm install @filoz/synapse-sdk ethers
+```
+
+2. **Environment setup**:
+
+```bash
+PRIVATE_KEY=your_wallet_private_key
+RPC_URL=https://api.calibration.node.glif.io/rpc/v1
+```
+
+3. **Account funded and approved**:
+   - Deposit USDFC tokens
+   - Approve WarmStorage as operator
+   - See [Top Up Balance](/synapse-sdk/payments/storage-monitoring)
+
+## Quick Start: Create Data Set
+
+Create a data set with storage context:
+
+```javascript
+import { Synapse } from "@filoz/synapse-sdk";
+
+// Initialize SDK
+const synapse = await Synapse.create({
+  privateKey: process.env.PRIVATE_KEY,
+  rpcURL: process.env.RPC_URL,
+});
+
+// Create storage context (auto-creates data set)
+const storageContext = await synapse.storage.createContext({
+  withCDN: false,
+  callbacks: {
+    onProviderSelected: (provider) => {
+      console.log("Provider:", provider.serviceProvider);
+    },
+    onDataSetResolved: (info) => {
+      if (info.isExisting) {
+        console.log("Using existing data set:", info.dataSetId);
+      } else {
+        console.log("Created new data set:", info.dataSetId);
+      }
+    },
+  },
+});
+
+console.log("Data set ID:", storageContext.dataSetId);
+console.log("Provider:", storageContext.provider.serviceProvider);
+```
+
+**What happens**:
+
+1. SDK selects a provider (or uses specified one)
+2. Creates data set on-chain via WarmStorage contract
+3. **Establishes payment rail** during data set creation (this is when the rail is created)
+4. Returns storage context with data set ID
+
+**Critical Understanding**: The payment rail is established when the data set is created, not when files are uploaded. All subsequent uploads to this data set will use the same payment rail. This is why creating a data set explicitly is useful for batch operations - you create one rail and reuse it for all uploads.
+
+## Create Data Set with Specific Provider
+
+Choose your provider explicitly:
+
+```javascript
+import { Synapse } from "@filoz/synapse-sdk";
+
+async function createDataSetWithProvider(providerAddress) {
+  const synapse = await Synapse.create({
+    privateKey: process.env.PRIVATE_KEY,
+    rpcURL: process.env.RPC_URL,
+  });
+
+  console.log("Creating data set with provider:", providerAddress);
+
+  // Create context with specific provider
+  const storageContext = await synapse.storage.createContext({
+    serviceProvider: providerAddress,
+    withCDN: false,
+    callbacks: {
+      onDataSetCreationStarted: (transaction) => {
+        console.log("Transaction:", transaction.hash);
+      },
+      onDataSetCreationProgress: (progress) => {
+        if (progress.transactionMined) {
+          console.log("✓ Transaction mined");
+        }
+        if (!progress.dataSetLive) {
+          console.log("  Waiting for data set to be live...");
+        }
+      },
+      onDataSetResolved: (info) => {
+        console.log("✓ Data set ready:", info.dataSetId);
+      },
+    },
+  });
+
+  console.log("\n=== Data Set Created ===");
+  console.log("Data set ID:", storageContext.dataSetId);
+  console.log("Provider:", storageContext.provider.serviceProvider);
+  console.log("Provider name:", storageContext.provider.name);
+
+  return storageContext;
+}
+
+// Usage
+const providerAddress = "0x1234...";
+const context = await createDataSetWithProvider(providerAddress);
+```
+
+## List Available Providers
+
+Find providers before creating data set:
+
+```javascript
+import { Synapse } from "@filoz/synapse-sdk";
+import { ethers } from "ethers";
+
+async function listProvidersAndSelect() {
+  const synapse = await Synapse.create({
+    privateKey: process.env.PRIVATE_KEY,
+    rpcURL: process.env.RPC_URL,
+  });
+
+  // Get all providers
+  const providers = await synapse.storage.listProviders();
+
+  console.log(`Found ${providers.length} storage providers:\n`);
+
+  providers.forEach((provider, idx) => {
+    console.log(`[${idx + 1}] ${provider.name}`);
+    console.log(`    Address: ${provider.serviceProvider}`);
+    console.log(
+      `    Price: ${ethers.formatUnits(provider.pricePerEpochPerByte, 18)} USDFC/byte/epoch`
+    );
+    console.log(`    CDN: ${provider.cdnEnabled ? "Yes" : "No"}`);
+    console.log(`    Active: ${provider.active ? "Yes" : "No"}`);
+    console.log();
+  });
+
+  // Select cheapest active provider
+  const activeProviders = providers.filter((p) => p.active);
+
+  if (activeProviders.length === 0) {
+    throw new Error("No active providers available");
+  }
+
+  const cheapestProvider = activeProviders.reduce((min, p) =>
+    p.pricePerEpochPerByte < min.pricePerEpochPerByte ? p : min
+  );
+
+  console.log("Selected cheapest provider:", cheapestProvider.name);
+  console.log(
+    "Price:",
+    ethers.formatUnits(cheapestProvider.pricePerEpochPerByte, 18),
+    "USDFC/byte/epoch"
+  );
+
+  // Create data set with selected provider
+  const storageContext = await synapse.storage.createContext({
+    serviceProvider: cheapestProvider.serviceProvider,
+    withCDN: cheapestProvider.cdnEnabled,
+  });
+
+  return storageContext;
+}
+
+listProvidersAndSelect().catch(console.error);
+```
+
+## Find Existing Data Sets
+
+List your data sets:
+
+```javascript
+import { Synapse } from "@filoz/synapse-sdk";
+import { ethers } from "ethers";
+
+async function findMyDataSets() {
+  const synapse = await Synapse.create({
+    privateKey: process.env.PRIVATE_KEY,
+    rpcURL: process.env.RPC_URL,
+  });
+
+  const address = await synapse.signer.getAddress();
+  console.log("Finding data sets for:", address);
+
+  // Get all data sets for this client
+  const dataSets = await synapse.storage.findDataSets();
+
+  console.log(`\nFound ${dataSets.length} data sets:\n`);
+
+  for (const dataSet of dataSets) {
+    console.log(`Data Set #${dataSet.dataSetId}`);
+    console.log("  Provider:", dataSet.serviceProvider);
+    console.log("  Rail ID:", dataSet.railId);
+    console.log("  Piece count:", dataSet.pieceCount);
+
+    if (dataSet.pieceCount > 0) {
+      console.log("  Total size:", dataSet.totalSize, "bytes");
+      console.log(
+        "  Rate:",
+        ethers.formatUnits(dataSet.paymentRate, 18),
+        "USDFC/epoch"
+      );
+    }
+
+    console.log();
+  }
+
+  return dataSets;
+}
+
+findMyDataSets().catch(console.error);
+```
+
+## Reuse Existing Data Set
+
+Upload to an existing data set:
+
+```javascript
+import { Synapse } from "@filoz/synapse-sdk";
+
+async function uploadToExistingDataSet(dataSetId, providerAddress) {
+  const synapse = await Synapse.create({
+    privateKey: process.env.PRIVATE_KEY,
+    rpcURL: process.env.RPC_URL,
+  });
+
+  console.log("Connecting to existing data set:", dataSetId);
+
+  // Create context with existing data set
+  const storageContext = await synapse.storage.createContext({
+    dataSetId: dataSetId,
+    serviceProvider: providerAddress,
+    callbacks: {
+      onDataSetResolved: (info) => {
+        if (info.isExisting) {
+          console.log("✓ Using existing data set");
+        }
+      },
+    },
+  });
+
+  // Upload files to this data set
+  const file1 = Buffer.from("First file");
+  const file2 = Buffer.from("Second file");
+
+  console.log("\nUploading files...");
+
+  const result1 = await storageContext.upload(file1, {
+    metadata: { filename: "file1.txt" },
+  });
+  console.log("✓ Uploaded file1:", result1.pieceCid);
+
+  const result2 = await storageContext.upload(file2, {
+    metadata: { filename: "file2.txt" },
+  });
+  console.log("✓ Uploaded file2:", result2.pieceCid);
+
+  // Both files are in same data set
+  console.log("\nBoth files stored in data set:", storageContext.dataSetId);
+
+  return storageContext;
+}
+
+// Usage
+const dataSetId = 123; // From previous creation
+const providerAddress = "0x1234...";
+await uploadToExistingDataSet(dataSetId, providerAddress);
+```
+
+## Inspect Data Set Contents
+
+Check which pieces are in a data set:
+
+```javascript
+async function inspectDataSet(dataSetId, providerAddress) {
+  const synapse = await Synapse.create({
+    privateKey: process.env.PRIVATE_KEY,
+    rpcURL: process.env.RPC_URL,
+  });
+
+  const storageContext = await synapse.storage.createContext({
+    dataSetId,
+    serviceProvider: providerAddress,
+  });
+
+  // Get all pieces in this data set
+  const pieceCids = await storageContext.getDataSetPieces();
+
+  console.log(`Data set #${dataSetId} contains ${pieceCids.length} pieces`);
+
+  pieceCids.forEach((cid, idx) => {
+    console.log(`  [${idx + 1}] ${cid}`);
+  });
+
+  return pieceCids;
+}
+```
+
+## Complete Example: Create or Reuse Data Set
+
+Production workflow for data set management:
+
+```javascript
+import { Synapse, TIME_CONSTANTS } from "@filoz/synapse-sdk";
+import { ethers } from "ethers";
+
+async function manageDataSetAndUpload() {
+  const synapse = await Synapse.create({
+    privateKey: process.env.PRIVATE_KEY,
+    rpcURL: process.env.RPC_URL,
+  });
+
+  // 1. Check account health
+  const accountInfo = await synapse.payments.accountInfo();
+  const daysRemaining =
+    Number(accountInfo.fundedUntilEpoch - accountInfo.currentEpoch) /
+    Number(TIME_CONSTANTS.EPOCHS_PER_DAY);
+
+  console.log(
+    "Balance:",
+    ethers.formatUnits(accountInfo.currentFunds, 18),
+    "USDFC"
+  );
+  console.log("Runway:", daysRemaining.toFixed(1), "days");
+
+  if (daysRemaining < 3) {
+    throw new Error("Low balance! Top up before creating data set.");
+  }
+
+  // 2. Find existing data sets or create new
+  const existingDataSets = await synapse.storage.findDataSets();
+  let storageContext;
+
+  if (existingDataSets.length > 0) {
+    // Reuse existing
+    const dataSet = existingDataSets[0];
+    console.log("Reusing data set:", dataSet.dataSetId);
+
+    storageContext = await synapse.storage.createContext({
+      dataSetId: dataSet.dataSetId,
+      serviceProvider: dataSet.serviceProvider,
+    });
+  } else {
+    // Create new with provider selection
+    const providers = await synapse.storage.listProviders();
+    const activeProviders = providers.filter((p) => p.active);
+
+    if (activeProviders.length === 0) {
+      throw new Error("No active providers available");
+    }
+
+    // Select cheapest provider
+    const provider = activeProviders.reduce((min, p) =>
+      p.pricePerEpochPerByte < min.pricePerEpochPerByte ? p : min
+    );
+
+    console.log("Selected provider:", provider.name);
+
+    storageContext = await synapse.storage.createContext({
+      serviceProvider: provider.serviceProvider,
+      callbacks: {
+        onDataSetResolved: (info) => {
+          console.log("✓ Data set created:", info.dataSetId);
+        },
+      },
+    });
+  }
+
+  // 3. Preflight check before upload
+  const testData = Buffer.alloc(1024 * 100, "test"); // 100 KB
+  const preflight = await storageContext.preflightUpload(testData);
+
+  console.log(
+    "Cost per epoch:",
+    ethers.formatUnits(preflight.estimatedCost, 18),
+    "USDFC"
+  );
+
+  if (!preflight.allowanceCheck.sufficient) {
+    throw new Error(
+      "Insufficient allowances: " + preflight.allowanceCheck.message
+    );
+  }
+
+  // 4. Upload file
+  const result = await storageContext.upload(testData, {
+    metadata: { filename: "test-file.bin" },
+  });
+
+  console.log("\n✅ Success!");
+  console.log("PieceCID:", result.pieceCid);
+  console.log("Data set:", result.dataSetId);
+
+  return result;
+}
+
+manageDataSetAndUpload().catch(console.error);
+```
+
+## Best Practices
+
+**When to Create New Data Set**:
+
+- Starting with a new provider
+- Want separate payment tracking per project
+- Testing different providers for performance
+- Organizing data by logical groupings
+
+**When to Reuse Existing Data Set**:
+
+- Uploading related files to same provider
+- Minimizing payment rails (lower gas costs)
+- Cost optimization (fewer transactions)
+- Files belong to same logical collection
+
+**Provider Selection Criteria**:
+
+- Price per byte per epoch (compare active providers)
+- CDN availability (if needed for retrieval)
+- Provider reputation and reliability
+- Geographic proximity for latency
+
+**Data Set Management Tips**:
+
+- Always list existing data sets before creating new ones
+- Use preflight checks before uploading
+- Monitor piece counts and storage costs
+- Track payment rail IDs for accounting
+- Reuse data sets whenever appropriate
+
+## Troubleshooting
+
+For common data set management errors and solutions, see the [Storage Troubleshooting Guide](/synapse-sdk/storage/troubleshooting), which covers:
+
+- No active providers available (wait and retry, contact provider)
+- Insufficient allowances (top up balance, approve operator)
+- Data set creation failures (check balance and approval)
+- Invalid data set ID errors (use findDataSets() to get valid IDs)
+- Provider not found (use listProviders() to find valid addresses)
+
+## Next Steps
+
+Now that you can manage data sets:
+
+- [**Upload Files**](/synapse-sdk/storage/upload) - Add pieces to your data set
+- [**Retrieve Files**](/synapse-sdk/storage/retrieve) - Download pieces from data set
+- [**Storage Troubleshooting**](/synapse-sdk/storage/troubleshooting) - Error handling and solutions
+- [**Monitor Usage**](/synapse-sdk/payments/storage-monitoring/) - Track data set costs
+
+## Summary
+
+**Key Concepts**:
+
+- Data set = Collection of pieces stored with one provider
+- **One data set = One payment rail** (rail created during data set creation)
+- SDK auto-manages by default, or you can control explicitly
+- Reuse data sets for multiple related uploads to share the same payment rail
+
+**Key Functions**:
+
+- `synapse.storage.createContext()` - Create or connect to data set
+- `synapse.storage.findDataSets()` - List your existing data sets
+- `synapse.storage.listProviders()` - Discover available providers
+- `storageContext.getDataSetPieces()` - List pieces in data set
+- `storageContext.preflightUpload()` - Estimate costs before uploading
+
+**Essential Checks**:
+
+- Account balance and runway (minimum 3-7 days recommended)
+- Provider availability, pricing, and CDN support
+- Existing data sets before creating new ones
+- Preflight cost estimation before uploads
+
+**Production Tips**:
+
+- Always list existing data sets first (reuse when appropriate)
+- Compare provider pricing and select based on needs
+- Use callbacks to monitor data set creation progress
+- Run preflight checks before every upload
+- Track data set IDs and payment rails for accounting
+
+Ready to upload files? See [How to Upload a File](/synapse-sdk/storage/upload)!

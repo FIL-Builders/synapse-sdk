@@ -1,0 +1,347 @@
+---
+title: How to Retrieve a File
+description: How to Retrieve a File using the Synapse SDK.
+sidebar:
+  order: 3
+---
+
+This guide shows you how to download files from Filecoin On-Chain Cloud storage using the Synapse SDK. You'll learn how to retrieve data by PieceCID using Node.js and Ethers.js.
+
+For core concepts like PieceCID and storage contexts, see the [Storage Overview](/synapse-sdk/storage/).
+
+## Prerequisites
+
+Before retrieving files, ensure you have:
+
+1. **Synapse SDK installed**:
+
+```bash
+npm install @filoz/synapse-sdk ethers
+```
+
+2. **Environment setup**:
+
+```bash
+# Required environment variables
+PRIVATE_KEY=your_wallet_private_key
+RPC_URL=https://api.calibration.node.glif.io/rpc/v1
+```
+
+3. **PieceCID**: The unique identifier returned when you uploaded the file
+   - Format: `baga6ea4seaq...` (base32-encoded)
+   - Save this from your upload result
+
+## Quick Start: Simple Download
+
+The simplest way to download a file:
+
+```javascript
+import { Synapse } from "@filoz/synapse-sdk";
+import { writeFileSync } from "fs";
+
+// Initialize SDK
+const synapse = await Synapse.create({
+  privateKey: process.env.PRIVATE_KEY,
+  rpcURL: process.env.RPC_URL,
+});
+
+// Download by PieceCID (SDK finds provider automatically)
+const pieceCid =
+  "baga6ea4seaqao7s73y24kcutaosvacpdjgfe5pw76ooefnyqw4ynr3d2y6x2mpq";
+const fileData = await synapse.storage.download(pieceCid);
+
+// Save to disk
+writeFileSync("./downloaded-file.txt", fileData);
+
+console.log("✅ Downloaded:", fileData.length, "bytes");
+```
+
+**What happens**:
+
+1. SDK queries WarmStorage contract for piece location
+2. Finds active provider storing the piece
+3. Downloads data from provider's HTTP endpoint
+4. Returns raw file data as `Uint8Array`
+
+## Complete Download Example
+
+For production use with error handling and verification:
+
+```javascript
+import { Synapse } from "@filoz/synapse-sdk";
+import { writeFileSync } from "fs";
+import { createHash } from "crypto";
+
+async function downloadWithVerification(pieceCid, outputPath) {
+  // 1. Initialize SDK
+  console.log("=== Filecoin Storage Download ===\n");
+
+  const synapse = await Synapse.create({
+    privateKey: process.env.PRIVATE_KEY,
+    rpcURL: process.env.RPC_URL,
+  });
+
+  console.log("Connected as:", await synapse.signer.getAddress());
+
+  // 2. Validate PieceCID format
+  if (!pieceCid || !pieceCid.startsWith("baga")) {
+    throw new Error("Invalid PieceCID format");
+  }
+
+  console.log("\nDownloading piece:", pieceCid);
+
+  // 3. Download file
+  const startTime = Date.now();
+
+  const fileData = await synapse.storage.download(pieceCid);
+
+  const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+  const fileSizeMB = fileData.length / (1024 * 1024);
+
+  console.log(`✓ Downloaded ${fileSizeMB.toFixed(2)} MB in ${duration}s`);
+
+  // 4. Calculate checksum (optional verification)
+  const hash = createHash("sha256").update(fileData).digest("hex");
+  console.log("✓ SHA-256:", hash);
+
+  // 5. Save to disk
+  writeFileSync(outputPath, fileData);
+  console.log("✓ Saved to:", outputPath);
+
+  console.log("\n✅ Download complete!");
+
+  return {
+    pieceCid,
+    size: fileData.length,
+    hash,
+    path: outputPath,
+  };
+}
+
+// Run
+const pieceCid = process.argv[2];
+const outputPath = process.argv[3] || "./downloaded-file.bin";
+
+if (!pieceCid) {
+  console.error("Usage: node download.js <piece-cid> [output-path]");
+  process.exit(1);
+}
+
+downloadWithVerification(pieceCid, outputPath)
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error("\n❌ Download failed:", error.message);
+    process.exit(1);
+  });
+```
+
+**Run it**:
+
+```bash
+node download.js baga6ea4seaq... ./my-file.pdf
+```
+
+## Download from Specific Provider
+
+If you know which provider stores the file, you can download directly:
+
+```javascript
+import { Synapse } from "@filoz/synapse-sdk";
+
+async function downloadFromProvider(pieceCid, providerAddress) {
+  const synapse = await Synapse.create({
+    privateKey: process.env.PRIVATE_KEY,
+    rpcURL: process.env.RPC_URL,
+  });
+
+  // Download from specific provider
+  const fileData = await synapse.storage.download(pieceCid, {
+    providerAddress: providerAddress,
+  });
+
+  console.log("Downloaded from provider:", providerAddress);
+  console.log("Size:", fileData.length, "bytes");
+
+  return fileData;
+}
+
+// Usage
+const pieceCid =
+  "baga6ea4seaqao7s73y24kcutaosvacpdjgfe5pw76ooefnyqw4ynr3d2y6x2mpq";
+const providerAddress = "0x1234..."; // Provider's address
+
+const data = await downloadFromProvider(pieceCid, providerAddress);
+```
+
+**When to use**:
+
+- You know which provider stores your file
+- Optimizing for latency with a known fast provider
+- Testing provider-specific retrieval
+
+## Download with CDN
+
+If your file was uploaded with CDN enabled, you can retrieve it via CDN:
+
+```javascript
+const fileData = await synapse.storage.download(pieceCid, {
+  withCDN: true,
+});
+
+console.log("✓ Downloaded via CDN:", fileData.length, "bytes");
+```
+
+**Note**: CDN must have been enabled during upload for this to work. CDN downloads may have lower latency for frequently accessed files.
+
+## Error Handling
+
+For production downloads, implement retry logic and handle common errors. See the [Storage Troubleshooting Guide](/synapse-sdk/storage/troubleshooting) for detailed error handling patterns including:
+
+- Piece not found errors
+- Provider availability issues
+- Invalid PieceCID format errors
+- Network timeouts and retries
+- Rate limiting with exponential backoff
+
+**Quick error handling example**:
+
+```javascript
+async function downloadWithRetry(pieceCid, maxRetries = 3) {
+  const synapse = await Synapse.create({
+    privateKey: process.env.PRIVATE_KEY,
+    rpcURL: process.env.RPC_URL,
+  });
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await synapse.storage.download(pieceCid);
+    } catch (error) {
+      if (attempt === maxRetries) throw error;
+
+      // Retry on network errors
+      if (
+        error.message.includes("network") ||
+        error.message.includes("timeout")
+      ) {
+        const waitTime = Math.pow(2, attempt) * 1000;
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+        continue;
+      }
+
+      throw error; // Non-retryable error
+    }
+  }
+}
+```
+
+## Verify Download Integrity
+
+Always verify downloaded files match expected content:
+
+```javascript
+import { Synapse } from "@filoz/synapse-sdk";
+import { writeFileSync } from "fs";
+import { createHash } from "crypto";
+
+async function downloadAndVerify(pieceCid, outputPath) {
+  const synapse = await Synapse.create({
+    privateKey: process.env.PRIVATE_KEY,
+    rpcURL: process.env.RPC_URL,
+  });
+
+  console.log("Downloading:", pieceCid);
+
+  // Download file
+  const fileData = await synapse.storage.download(pieceCid);
+
+  console.log("✓ Downloaded:", fileData.length, "bytes");
+
+  // Calculate checksum
+  const hash = createHash("sha256").update(fileData).digest("hex");
+  console.log("✓ SHA-256:", hash);
+
+  // Save to disk
+  writeFileSync(outputPath, fileData);
+  console.log("✓ Saved to:", outputPath);
+
+  return { fileData, hash };
+}
+
+// Usage
+const result = await downloadAndVerify("baga6ea4seaq...", "./my-file.pdf");
+```
+
+**Best practice**: Store the SHA-256 hash when uploading, then verify it matches when downloading to ensure data integrity.
+
+## Best Practices
+
+**Before Download**:
+
+- Validate PieceCID format (must start with `baga`)
+- Ensure output directory exists
+- Have provider address for faster retrieval (optional)
+
+**During Download**:
+
+- Implement retry logic for network errors
+- Use exponential backoff for retries
+- Log download attempts for debugging
+- Handle data as `Uint8Array` (convert as needed)
+
+**After Download**:
+
+- Verify integrity with SHA-256 checksum
+- Save to disk immediately
+- Store checksum for future verification
+- Handle errors gracefully
+
+**For Production**:
+
+- Implement retry logic with exponential backoff
+- Cache downloaded files locally when appropriate
+- Monitor provider availability
+- Log all downloads with timestamps and outcomes
+
+## Troubleshooting
+
+For common download errors and solutions, see the [Storage Troubleshooting Guide](/synapse-sdk/storage/troubleshooting), which covers:
+
+- Piece not found errors (verify PieceCID, check upload completion)
+- Provider availability issues (retry, contact provider)
+- Invalid PieceCID format (must start with `baga`)
+- Network timeouts and connectivity problems
+- Data integrity verification failures
+
+## Next Steps
+
+Now that you can retrieve files:
+
+- [**Upload Files**](/synapse-sdk/storage/upload) - Store new files
+- [**Create Data Sets**](/synapse-sdk/storage/create-dataset) - Explicit data set management
+- [**Storage Troubleshooting**](/synapse-sdk/storage/troubleshooting) - Error handling and solutions
+- [**Monitor Usage**](/synapse-sdk/payments/storage-monitoring/) - Track egress and costs
+
+## Summary
+
+**Key Functions**:
+
+- `synapse.storage.download(pieceCid)` - Simple auto-managed download
+- `synapse.storage.download(pieceCid, { providerAddress })` - Download from specific provider
+- `synapse.storage.download(pieceCid, { withCDN: true })` - Download via CDN
+
+**Essential Checks**:
+
+- PieceCID format validation (must start with `baga`)
+- Provider availability (SDK handles automatically)
+- File integrity verification (SHA-256 checksum)
+- Error handling with retries
+
+**Production Tips**:
+
+- Implement retry logic with exponential backoff
+- Always verify checksums after download
+- Cache frequently accessed files locally
+- Log all download operations with timestamps
+- Handle `Uint8Array` result appropriately
+
+Ready to manage data sets explicitly? See [How to Create a Data Set](/synapse-sdk/storage/create-dataset)!
