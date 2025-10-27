@@ -1,0 +1,68 @@
+---
+title: Overview
+description: Overview of Core Concepts of Filecoin Onchain Cloud.
+sidebar:
+  order: 0
+---
+
+## What is Filecoin On-Chain Cloud?
+
+Filecoin On-Chain Cloud is a **smart-contract marketplace for decentralized storage services** built on the Filecoin network. It enables developers to build applications that store and verify data on Filecoin while giving them the opportunity to build their own storage services.
+
+The system provides:
+
+- **Provable storage** through cryptographic verification (PDP)
+- **Automated payments** via smart contract payment rails
+- **Programmable services** through smart contract-based service primitives
+- **Developer-friendly SDK** with TypeScript interfaces
+
+## System Architecture
+
+The Filecoin On-Chain Cloud system consists of three smart contracts working together on Filecoin EVM.
+
+### Proof of Data Possession (PDP)
+
+PDP is a cryptographic protocol that allows storage providers to prove they possess your data **without revealing the data itself**. The system uses randomized challenges and Merkle proofs to verify storage continuously, with all verification happening on-chain.
+
+**Key benefits:**
+
+- Cryptographically verifiable storage
+- Small proofs for large data
+- Continuous verification (not one-time)
+
+[Learn more about PDP →](/core-concepts/pdp-overview)
+
+### Payment Rails and Lockup
+
+Payment rails are **automated payment channels** that stream tokens from clients to providers at a specified rate (e.g., 100 USDFC/epoch). The lockup mechanism ensures providers get paid even if clients abandon their accounts by reserving funds for a guaranteed period.
+
+[Learn more about FilecoinPay →](/core-concepts/filecoin-pay-overview)
+
+### Warm Storage Service
+
+Warm Storage is the **business logic layer** that combines PDP verification with payment rails. It handles client authentication, payment coordination, pricing, metadata management, and fault handling.
+
+Service providers run Curio nodes that store data, submit proofs, and provide HTTP APIs for upload/download.
+
+[Learn more about Warm Storage →](/core-concepts/fwss-overview)
+
+## What's Next?
+
+Ready to dive deeper? We recommend this learning path:
+
+**Understanding the System**:
+
+1. [**System Architecture**](/core-concepts/architecture) - How all components work together (start here!)
+2. [**Proof of Data Possession (PDP)**](/core-concepts/pdp-overview) - Cryptographic verification explained
+3. [**FilecoinPay Technical Overview**](/core-concepts/filecoin-pay-overview) - Payment rails and settlement
+4. [**Warm Storage Service**](/core-concepts/fwss-overview) - Business logic layer
+
+**Building Applications**:
+
+- [**Synapse SDK**](/synapse-sdk/about) - SDK architecture and components
+- [**Developer Guides**](/synapse-sdk/) - Step-by-step tutorials and examples
+
+**Reference**:
+
+- [**Glossary**](/core-concepts/glossary) - Key terms and definitions
+- [**Troubleshooting**](/core-concepts/troubleshooting) - Common issues and solutions

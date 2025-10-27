@@ -96,7 +96,7 @@ export default defineConfig({
           autogenerate: { directory: "core-concepts" },
         },
         {
-          label: "Synapse SDK Guides",
+          label: "Developer Guides",
           autogenerate: { directory: "synapse-sdk" },
         },
         {
