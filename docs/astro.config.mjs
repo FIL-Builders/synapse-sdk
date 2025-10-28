@@ -4,6 +4,7 @@ import { defineConfig } from "astro/config";
 import ecTwoSlash from "expressive-code-twoslash";
 import starlightLlmsTxt from "starlight-llms-txt";
 import viteTsconfigPaths from "vite-tsconfig-paths";
+import mermaid from "astro-mermaid";
 
 const site = "https://synapse.filecoin.services";
 
@@ -15,6 +16,10 @@ export default defineConfig({
     plugins: [viteTsconfigPaths()],
   },
   integrations: [
+    mermaid({
+      theme: "forest",
+      autoTheme: true,
+    }),
     starlight({
       title: "Filecoin Onchain Cloud",
       logo: { src: "./src/assets/foc-logo.svg", alt: "synapse" },
@@ -93,6 +98,14 @@ export default defineConfig({
         {
           label: "Developer Guides",
           autogenerate: { directory: "synapse-sdk" },
+        },
+        {
+          label: "Contracts",
+          autogenerate: { directory: "contracts" },
+        },
+        {
+          label: "CookBook",
+          autogenerate: { directory: "cookbook" },
         },
         {
           label: "Resources",

@@ -1,5 +1,5 @@
 ---
-title: Warm Storage Service
+title: Warm Storage
 description: Learn about the Filecoin Warm Storage Service.
 sidebar:
   order: 5
@@ -10,6 +10,12 @@ sidebar:
 **Filecoin Warm Storage Service (FWSS)** is the **business logic and coordination layer** that sits on top of the neutral PDP and Payments protocols to create a complete storage marketplace.
 
 Warm Storage is the application layer in the [**three-layer architecture**](/core-concepts/architecture#architectural-principles), combining the neutral PDP protocol and generic FilecoinPay infrastructure into a complete storage service.
+
+:::tip[Choose Your Path]
+- **SDK Users**: Focus on the high-level concepts, then jump to [Synapse SDK guides](/synapse-sdk/)
+- **Smart Contract Developers**: Study the PDPListener integration and EIP-712 authentication
+- **Protocol Researchers**: Deep dive into the metadata system and fault handling patterns
+:::
 
 ### Why "Warm Storage"?
 
@@ -202,6 +208,28 @@ function validatePayment(
 
 This integration allows the service layer to automatically enforce quality of service through payment adjustments.
 
+:::note[Validator Status]
+The IValidator integration is **planned for future implementation**. Currently, WarmStorage logs faults but does not apply payment penalties. Future versions will implement SLA enforcement through payment adjustments.
+:::
+
+## Security Boundaries
+
+**Authentication Boundaries**:
+- WarmStorage authenticates all client operations via EIP-712 signatures
+- Never trusts off-chain requests without cryptographic signatures
+- Client signatures must be validated before any state changes
+
+**Contract Boundaries**:
+- PDPVerifier owns proof verification logic; WarmStorage reacts to callbacks
+- FilecoinPay owns token accounting; WarmStorage requests changes within allowances
+- WarmStorage owns metadata and pricing; other contracts cannot modify directly
+
+**Trust Model**:
+- Clients trust approved operators (WarmStorage) to create fair payment rails
+- Providers trust lockup mechanism for payment guarantees
+- Both parties trust PDPVerifier for neutral proof verification
+- All trust relationships are explicit and on-chain
+
 ## Metadata System
 
 ### Data Set Metadata
@@ -265,8 +293,22 @@ This integration allows the service layer to automatically enforce quality of se
 - Retrieval latency: milliseconds
 - Higher cost, for performance-critical data
 
+### Pricing Model Inputs
 
-### Allowance Requirements
+**Storage Cost Calculation**:
+- **Size**: Total bytes across all pieces in data set
+- **Duration**: Number of epochs to store (minimum 1 epoch)
+- **CDN Usage**: Whether pieces require CDN access
+- **Rate**: `size × epochs × (basePrice + cdnPrice)`
+
+**Allowance Requirements**:
+- **Rate Allowance**: Maximum tokens per epoch across all rails
+- **Lockup Allowance**: Maximum total lockup amount
+- **Lockup Period**: Maximum lockup duration per rail
+
+:::note[Current Pricing]
+Pricing is set by the WarmStorage contract and can be queried via `getServicePrice()`. Users must approve sufficient allowances before creating storage contexts.
+:::
 
 
 ## Complete Upload Flow

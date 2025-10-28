@@ -1,11 +1,17 @@
 ---
-title: FilecoinPay Technical Overview
+title: FilecoinPay Overview
 description: Learn about the FilecoinPay smart contract system for automated payment rails.
 sidebar:
   order: 3
 ---
 
 This guide explains **FilecoinPay V1**, the generic payment infrastructure that powers automated payment channels (rails) between clients and storage providers in the Filecoin On-Chain Cloud.
+
+:::tip[Choose Your Path]
+- **SDK Users**: Focus on the concepts, then jump to [Payment Setup Guide](/synapse-sdk/payments/)
+- **Smart Contract Developers**: Study the contract interfaces and operator patterns
+- **Protocol Researchers**: Deep dive into the lockup mechanism and security properties
+:::
 
 :::tip[Related Documentation]
 
@@ -49,6 +55,20 @@ struct Account {
 
 - Can be withdrawn anytime
 - Not locked in active rails
+
+### Funding Math
+
+**Available Balance**: `account.funds - account.lockupCurrent`
+
+**Streaming Lockup**: `paymentRate × lockupPeriod`
+- Example: 3 USDFC/epoch × 2,880 epochs = 8,640 USDFC locked
+
+**Total Lockup**: `streamingLockup + lockupFixed`
+- Example: 8,640 + 100 = 8,740 USDFC total locked
+
+**Termination End Epoch**: `lastSettledEpoch + lockupPeriod`
+- Provider can settle from locked funds up to this epoch
+- Guarantees payment even if client disappears
 
 ### Payment Rail
 
@@ -301,14 +321,6 @@ For SDK implementation and examples, see the [Payment Guides](/synapse-sdk/payme
 - Both parties can optionally trust validators for dispute resolution
 - All trust relationships are explicit and on-chain
 
-## Summary
-
-FilecoinPay V1 provides **generic payment infrastructure** for automated service payments through configurable payment channels (rails).
-
-**Core Components**: Accounts (fund storage), Rails (payment channels), Operators (service contracts), Validators (optional arbitrators)
-
-**Key Innovation**: Lockup safety hatch guarantees provider payment even if clients abandon accounts
-
 ## For Different Audiences
 
 :::tip[SDK Users - Implementing Payments]
@@ -317,21 +329,29 @@ You want to use FilecoinPay in your application:
 - [**Payment Setup Guide**](/synapse-sdk/payments/) - Fund accounts and approve operators
 - [**Monitor Usage Guide**](/synapse-sdk/payments/storage-monitoring/) - Track payment health
 - [**Troubleshooting Guide**](/synapse-sdk/payments/troubleshooting) - Common issues
-  :::
+:::
 
 :::note[Contract Developers - Building Services]
 You want to build a service that uses FilecoinPay:
 
-- Study the Payments contract source code
+- Study the FilecoinPay contract source code
 - Implement the operator pattern
 - Consider validator integration for SLAs
 - See WarmStorage as a reference implementation
-  :::
+:::
 
 :::info[Protocol Researchers - Understanding Design]
 You want to understand the protocol deeply:
 
 - [**FilecoinPay Cookbook**](/core-concepts/filecoin-pay-cookbook) - Use cases and patterns
 - [**System Architecture**](/core-concepts/architecture) - Integration with storage and PDP
-- Review the Payments contract implementation
-  :::
+- Review the FilecoinPay contract implementation
+:::
+
+## Summary
+
+FilecoinPay V1 provides **generic payment infrastructure** for automated service payments through configurable payment channels (rails).
+
+**Core Components**: Accounts (fund storage), Rails (payment channels), Operators (service contracts), Validators (optional arbitrators)
+
+**Key Innovation**: Lockup safety hatch guarantees provider payment even if clients abandon accounts

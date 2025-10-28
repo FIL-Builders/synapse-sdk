@@ -7,6 +7,12 @@ sidebar:
 
 This guide explains Proof of Data Possession (PDP), the cryptographic protocol that enables storage providers to prove they possess your data without revealing the data itself.
 
+:::tip[Choose Your Path]
+- **SDK Users**: Focus on the high-level concepts, then jump to [Synapse SDK guides](/synapse-sdk/)
+- **Smart Contract Developers**: Study the contract interfaces and verification logic
+- **Protocol Researchers**: Deep dive into the security properties and cryptographic details
+:::
+
 :::tip[Architecture Integration]
 This page focuses on the PDP cryptographic protocol details. To understand how PDP integrates with the overall system architecture, see [**System Architecture**](/core-concepts/architecture).
 :::
@@ -16,6 +22,32 @@ This page focuses on the PDP cryptographic protocol details. To understand how P
 **Proof of Data Possession (PDP)** is a cryptographic verification protocol that allows a storage provider to prove they are storing your data **without sending you the actual data**.
 
 Think of it like a bank proving they have your money in the vault without opening the vault and counting every bill in front of you.
+
+:::note[PDP Constraints]
+- **Piece sizes**: Must be multiples of 32 bytes (Filecoin requirement)
+- **Maximum piece size**: 254 MiB per piece
+- **PieceCID format**: Last 32 bytes of v2 CID used on-chain (not full CID)
+- **Challenge timing**: Based on Filecoin epochs (~30 seconds each)
+- **Proof window**: Typically 100-200 epochs (~50-100 minutes) to submit proofs
+:::
+
+## Performance Characteristics
+
+**Proof sizes**: Logarithmic in piece size
+- 1 MB piece ≈ 480 bytes proof
+- 128 MB piece ≈ 704 bytes proof  
+- 1 GB piece ≈ 1 KB proof
+
+**Verification cost**: On-chain verification is fast and deterministic
+- Gas cost scales with proof size (logarithmic)
+- No external dependencies during verification
+- Suitable for high-frequency challenges
+
+**Provider obligations**:
+- Store original piece data (required to regenerate proofs)
+- Monitor blockchain for challenges
+- Generate Merkle proofs within challenge window
+- Submit proofs before window expires
 
 ## Why PDP Matters
 
@@ -178,6 +210,11 @@ source code in curio [here](https://github.com/filecoin-project/curio/blob/main/
 
 **Merkle Proof Structure**:
 
+A Merkle proof consists of the challenged leaf and sibling hashes along the path to the root.
+
+<details>
+<summary>Merkle Tree Implementation Reference</summary>
+
 ```solidity
 // Builds a merkle tree from an array of leaves.
 // The tree is an array of arrays of bytes32.
@@ -185,22 +222,20 @@ source code in curio [here](https://github.com/filecoin-project/curio/blob/main/
 // An unpaired element is paired with the root of a tree of the same height with zero leaves.
 // The first element of the first array is the root.
 function buildTree(bytes32[] memory leaves) internal view returns (bytes32[][] memory)
-```
 
-```solidity
 // Gets an inclusion proof from a Merkle tree for a leaf at a given index.
 // The proof is constructed by traversing up the tree to the root, and the sibling of each node is appended to the proof.
 // A final unpaired element in any level is paired with the zero-tree of the same height.
 // Every proof thus has length equal to the height of the tree minus 1.
 function buildProof(bytes32[][] memory tree, uint256 index) internal pure returns (bytes32[] memory)
-```
 
-```solidity
 struct Proof {
     bytes32 leaf;
     bytes32[] proof;
 }
 ```
+
+</details>
 
 **Process**:
 
@@ -219,6 +254,11 @@ struct Proof {
 
 **Contract verification**:
 
+The contract verifies proofs by recomputing the Merkle root and comparing it to the stored PieceCID.
+
+<details>
+<summary>Contract Verification Reference</summary>
+
 ```solidity
 function provePossession(
     uint256 setId,
@@ -230,6 +270,8 @@ function provePossession(
     // 4. Emit success event or revert
 }
 ```
+
+</details>
 
 **Verification Steps**:
 
