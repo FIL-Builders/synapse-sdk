@@ -14,3 +14,4 @@ filecoin-project-*/
 
 # Local Netlify folder
 .netlify
+.wireit/
