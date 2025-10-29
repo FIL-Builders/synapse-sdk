@@ -5,23 +5,20 @@ sidebar:
   order: 2
 ---
 
-This guide explains Proof of Data Possession (PDP), the cryptographic protocol that enables storage providers to prove they possess your data without revealing the data itself.
-
-:::tip[Choose Your Path]
-- **SDK Users**: Focus on the high-level concepts, then jump to [Synapse SDK guides](/synapse-sdk/)
-- **Smart Contract Developers**: Study the contract interfaces and verification logic
-- **Protocol Researchers**: Deep dive into the security properties and cryptographic details
-:::
+This guide explains **Proof of Data Possession (PDP)**, the cryptographic protocol which ensures every dataset stored within the **Filecoin Onchain Cloud (FOC)** remains accessible, verifiable, and provably intact without re-uploading the full data.
 
 :::tip[Architecture Integration]
-This page focuses on the PDP cryptographic protocol details. To understand how PDP integrates with the overall system architecture, see [**System Architecture**](/core-concepts/architecture).
+This page focuses on the PDP protocol details. To understand how PDP integrates with the overall system architecture, see [**System Architecture**](/core-concepts/architecture).
 :::
 
 ## What is PDP?
 
-**Proof of Data Possession (PDP)** is a cryptographic verification protocol that allows a storage provider to prove they are storing your data **without sending you the actual data**.
+**Proof of Data Possession (PDP)** is a cryptographic protocol that allows a client or smart contract to verify that a storage provider still holds a dataset, without downloading it again.
 
-Think of it like a bank proving they have your money in the vault without opening the vault and counting every bill in front of you.
+In simple terms — PDP asks a provider to prove they still have the data by responding correctly to a randomized challenge generated from that data.
+If the provider no longer stores the content, they cannot produce a valid proof.
+
+This mechanism provides the verifiable heartbeat of Filecoin Onchain Cloud — proving that storage agreements are being honored in real time.
 
 :::note[PDP Constraints]
 - **Piece sizes**: Must be multiples of 32 bytes (Filecoin requirement)
@@ -31,24 +28,6 @@ Think of it like a bank proving they have your money in the vault without openin
 - **Proof window**: Typically 100-200 epochs (~50-100 minutes) to submit proofs
 :::
 
-## Performance Characteristics
-
-**Proof sizes**: Logarithmic in piece size
-- 1 MB piece ≈ 480 bytes proof
-- 128 MB piece ≈ 704 bytes proof  
-- 1 GB piece ≈ 1 KB proof
-
-**Verification cost**: On-chain verification is fast and deterministic
-- Gas cost scales with proof size (logarithmic)
-- No external dependencies during verification
-- Suitable for high-frequency challenges
-
-**Provider obligations**:
-- Store original piece data (required to regenerate proofs)
-- Monitor blockchain for challenges
-- Generate Merkle proofs within challenge window
-- Submit proofs before window expires
-
 ## Why PDP Matters
 
 Traditional cloud storage requires trust:
@@ -57,23 +36,22 @@ Traditional cloud storage requires trust:
 - You can't verify they actually have it without downloading everything
 - No cryptographic proof of possession
 
-**PDP provides cryptographic guarantees**:
+PDP is the key that allows Filecoin to evolve from *cold archival storage* to a **programmable cloud service layer** with fast data storage and retrival.
+It introduces trustless verifiability for short-term and live data use cases, enabling new service types like **Filecoin Warm Storage, Filecoin Pin, and Onchain Data Hosting**, etc.
 
-- ✅ **Verifiable**: Proofs are checked on-chain
-- ✅ **Efficient**: Small proofs (~few KB) verify large data (GB+)
-- ✅ **Trustless**: No need to trust the provider
-- ✅ **Continuous**: Ongoing verification, not one-time
-- ✅ **Decentralized**: Anyone can verify the proof
+PDP provides three essential guarantees:
 
-### How It Works (Simple Explanation)
+- **🧩 Integrity** — The data has not been altered or replaced. 
+- **🌐 Availability** — The data is physically present and retrievable when challenged.
+- **⚖️ Accountability** — Payments and service reputation are tied to verifiable proofs, not promises.
 
-1. **You upload data** to a storage provider
-2. **Provider computes a Merkle tree** from your data
-3. **Random challenges are generated** from blockchain randomness
-4. **Provider submits Merkle proofs** for challenged data
-5. **Smart contract verifies proofs** on-chain
-6. **If proofs fail**, faults are reported
+Every proof strengthens confidence that the Filecoin Onchain Cloud behaves like a reliable Web2-grade cloud, but with **onchain transparency and cryptographic verifiablity**.
 
+### How PDP Works
+
+At its core, PDP is a **challenge-response** protocol based on deterministic cryptography and verifiable computation. 
+
+Each verification cycle follows these steps:
 ```mermaid
 sequenceDiagram
     participant Client
@@ -100,6 +78,19 @@ sequenceDiagram
         end
     end
 ```
+
+#### **Step-by-step Summary:**
+1. **Data Upload**: The Client uploads file in a dataset to a PDP-enabled Service Provider which will  stores the file, and add piece in the dataset with the PDP contract onchain.
+
+2. **Challenge Creation**: The PDP contract or dataset owner generates a randomized challenge based on a known seed and dataset ID.
+
+3. **Proof Generation**: The Service Provider computes a proof using a subset of the stored data blocks (without revealing the actual data).
+
+4. **Onchain Verification**: The PDP contract recomputes the challenge and checks that the proof corresponds to the expected Merkle root or commitment.
+
+5. **Result & Settlement**: A successful verification emits an onchain event, which other contracts — such as Filecoin Pay — can use to release funds through the corresponding Payment Rail.
+
+Each successful PDP round is a verifiable heartbeat proving that the dataset is still alive within the Onchain Cloud.
 
 ## Core Components
 
