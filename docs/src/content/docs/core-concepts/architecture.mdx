@@ -2,7 +2,7 @@
 title: Foundations & Architecture
 description: Understanding the architecture, design principles, and roles that power Filecoin’s programmable, verifiable cloud.
 sidebar:
-  order: 1
+  order: 0
 ---
 
 **The Filecoin Onchain Cloud (FOC)** redefines the Filecoin Network as a **modular, programmable cloud platform** — a decentralized infrastructure where storage, retrieval, and payments are managed entirely through onchain smart contracts.
@@ -87,8 +87,6 @@ This modularity allows each layer to evolve independently while maintaining inte
 | **Storage & Retrieval Service Layer** | Executes fast, retrievable, verifiable data operations. | **Filecoin Warm Storage Service (FWSS)**, **Filecoin Beam**. |
 | **Developer Layer** | Exposes unified APIs and SDKs for interaction. | **Synapse SDK**, Filecoin Pin |
 
-Each service in this architecture is implemented as a Service Contract on the FVM, and the network as a whole behaves like a composable onchain runtime for decentralized data services.
-
 ### Service Contracts
 
 At the heart of the Filecoin Onchain Cloud are **Service Contracts** — modular, upgradable smart contracts that define and manage the behavior of each onchain service.
@@ -102,6 +100,32 @@ Each contract:
 - Emits events that allow public auditing and monitoring.
 
 Because Service Contracts are deployed on the Filecoin Virtual Machine, they can be composed together — enabling new service types and hybrid functionalities without central coordination.
+
+### Proof of Data Possession (PDP)
+
+PDP is a cryptographic protocol that allows storage providers to prove they possess your data **without revealing the data itself**. The system uses randomized challenges and Merkle proofs to verify storage continuously, with all verification happening on-chain.
+
+**Key benefits:**
+
+- Cryptographically verifiable storage
+- Small proofs for large data
+- Continuous verification (not one-time)
+
+[Learn more about PDP →](/core-concepts/pdp-overview)
+
+### Payment Rails and Lockup
+
+Payment rails are **automated payment channels** that stream tokens from clients to providers at a specified rate (e.g., 100 USDFC/epoch). The lockup mechanism ensures providers get paid even if clients abandon their accounts by reserving funds for a guaranteed period.
+
+[Learn more about FilecoinPay →](/core-concepts/filecoin-pay-overview)
+
+### Warm Storage
+
+Warm Storage is the **business logic layer** that combines PDP verification with payment rails. It handles client authentication, payment coordination, pricing, metadata management, and fault handling.
+
+Service providers run Curio nodes that store data, submit proofs, and provide HTTP APIs for upload/download.
+
+[Learn more about Warm Storage →](/core-concepts/fwss-overview)
 
 ## Next Steps
 
