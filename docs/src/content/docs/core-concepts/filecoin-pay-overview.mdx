@@ -1,170 +1,82 @@
 ---
-title: FilecoinPay Overview
-description: Learn about the FilecoinPay smart contract system for automated payment rails.
+title: Filecoin Pay
+description: The programmable on-chain settlement engine powering service economics within the Filecoin Onchain Cloud.
 sidebar:
   order: 3
 ---
 
-This guide explains **FilecoinPay V1**, the generic payment infrastructure that powers automated payment channels (rails) between clients and storage providers in the Filecoin On-Chain Cloud.
+As the economic core of the Filecoin Onchain Cloud (FOC), **Filecoin Pay** embeds **financial logic directly into on-chain contracts**, ensuring that providers receive funds only when they deliver verifiable service, and clients pay only when conditions are met.
 
-:::tip[Choose Your Path]
-- **SDK Users**: Focus on the concepts, then jump to [Payment Setup Guide](/synapse-sdk/payments/)
-- **Smart Contract Developers**: Study the contract interfaces and operator patterns
-- **Protocol Researchers**: Deep dive into the lockup mechanism and security properties
-:::
+With Filecoin Pay, service economics become as **transparent and composable** as the data services they underpin, enabling the Filecoin network to operate not just as a storage market but as a fully programmable cloud economy.
 
-:::tip[Related Documentation]
 
-- **Conceptual understanding**: See [**FilecoinPay Cookbook**](/core-concepts/filecoin-pay-cookbook) for use cases and design patterns
-- **System integration**: See [**System Architecture**](/core-concepts/architecture) for how FilecoinPay integrates with storage and PDP verification
-  :::
+## What is Filecoin Pay?
 
-## What is FilecoinPay?
+In the Filecoin Onchain Cloud architecture, services (storage, retrieval) must be paired with economic incentives. Without a robust, verifiable settlement layer, the system risks:
 
-**FilecoinPay V1** is a smart contract system for **automated ERC-20 token payments** through configurable payment channels called "rails."
+- Providers performing work without guaranteed payment.
+- Clients paying upfront without verifiable service delivery.
+- Opaque billing and trust-based relationships that undermine decentralisation.
 
-Think of it like setting up automatic bill pay, but:
 
-- ✅ **On-chain**: All payments verified by smart contracts
-- ✅ **Guaranteed**: Lockup mechanism ensures providers get paid
-- ✅ **Flexible**: Supports both streaming and one-time payments
-- ✅ **Generic**: Not specific to storage (any service can use it)
+Filecoin Pay addresses these risks by tying **service delivery** (e.g., proofs of data possession, retrieval success) to **on-chain payment flows** that lets services run automated, controllable payment “rails” between a payer and a payee. It supports:
 
-## Core Concepts
+- **Token-agnostic billing**: support for FIL, stablecoins, ERC-20 tokens.
+- **Trustless settlement**: payments only release once proofs or events trigger them.
+- **Composability**: payment rails become modular primitives that other services build on.
+- **Transparency & auditability**: every rail, deposit, payout and event is discoverable on-chain.
 
-### Account
+At its core, Filecoin Pay makes future payment guarantees explicit via lockups and enforces them in the contract’s accounting, so participants can reason clearly about risk, solvency, and termination behavior.
 
-**What**: Token balance and lockup tracking for a user
+## How Filecoin Pay works
+The Filecoin Pay smart contract enables ERC20 token payment flows through "rails" - enables automatic, verifiable, programmable settlement between users and service providers on the Filecoin Onchain Cloud.
 
-```solidity
-struct Account {
-    uint256 funds;              // Total USDFC deposited
-    uint256 lockupCurrent;      // Currently locked (sum of all rails)
-    uint256 lockupLastSettledAt; // Last epoch with full funding
-}
-```
+At its core, Filecoin Pay works by:
 
-**Key Properties**:
+- Holding user funds in **escrow using ERC-20 or FIL tokens**
+- Creating a **Payment Rail** that defines how and when money moves
+- Delegating execution to an **Operator**, who runs payment logic automatically
+- Allowing **Validators** (on-chain service contracts or actors) to trigger or authorize payments based on verified service outcomes (e.g., PDP proofs)
 
-- One account per address per token
-- Holds deposited tokens
-- Tracks locked vs available funds
-- Same address can be payer and payee
+### Core Building Blocks
 
-**Available Funds**: `funds - lockupCurrent`
+#### **Account**
+Represents the client’s funds allocated for a service.
+- Holds balances in **FIL or ERC-20 tokens**
+- Controlled by the user, not the provider
+- Can be topped up, withdrawn, and managed through smart contracts or Synapse SDK
 
-- Can be withdrawn anytime
-- Not locked in active rails
+#### **Payment Rail**: 
+A **automatic settlement channel** between a user and a provider for a specific service or dataset. Payer ↔ Payee pairs can have multiple payment rails between them but they can also reuse the same rail across multiple deals. 
 
-### Funding Math
+Each rail defines:
+- `token`: FIL, stablecoin, ERC-20
+- `payer` & `payee`: clients & service providers
+- `operator` & `validator` 
+- `paymentRate`: tokens per epoch
+- `lockupPeriod`： epochs of guaranteed cover after termination
+- `lockupFixed`: pool for one-time payments
+- `endEpoch`: Final epoch up to which the rail can be settled
 
-**Available Balance**: `account.funds - account.lockupCurrent`
+#### **Operator**
+**Trusted smart contract** or entity that manages rails on behalf of payers with caps. A payer must explicitly approve an operator and grant it specific allowances, which act as a budget for how much the operator can spend or lock up on the payer's behalf.
 
-**Streaming Lockup**: `paymentRate × lockupPeriod`
-- Example: 3 USDFC/epoch × 2,880 epochs = 8,640 USDFC locked
+The operator sometimes referred to as the "**service contract**", such as Filecoin Warm Storage Service, and File Beam CND service, etc. 
 
-**Total Lockup**: `streamingLockup + lockupFixed`
-- Example: 8,640 + 100 = 8,740 USDFC total locked
+**Capabilities** of an approved operator: create rails, modify rail terms (rate, lockup), settle payments, terminate rails, execute one-time payments
 
-**Termination End Epoch**: `lastSettledEpoch + lockupPeriod`
-- Provider can settle from locked funds up to this epoch
-- Guarantees payment even if client disappears
+#### **Validator**
+A validator is an optional contract that acts as a trusted arbitrator for a rail. Its primary role is to validate payments during settlement, but it also plays a crucial part in the rail's lifecycle, especially during termination.
 
-### Payment Rail
-
-**What**: An automated payment channel from payer to payee
-
-```solidity
-struct Rail {
-    address payer;           // Client
-    address payee;           // Provider
-    address operator;        // Service contract (e.g., WarmStorage)
-    address validator;       // Optional arbitrator
-    uint256 paymentRate;     // Tokens per epoch
-    uint256 lockupPeriod;    // Guarantee period (epochs)
-    uint256 lockupFixed;     // One-time payment pool
-    uint256 settledUpTo;     // Last settled epoch
-    uint256 endEpoch;        // Termination epoch (0 if active)
-}
-```
-
-**Visual Representation**:
-
-```mermaid
-graph LR
-    subgraph "Payment Rail"
-        Payer[Client<br/>Account] -->|paymentRate:<br/>3 USDFC/epoch| Rail
-        Rail -->|Payments| Payee[Provider<br/>Account]
-        Operator[WarmStorage<br/>Contract] -.manages.-> Rail
-        Validator[Optional<br/>Arbitrator] -.validates.-> Rail
-    end
-
-    subgraph "Lockup"
-        L1[Streaming: 3×2880<br/>= 8640 USDFC]
-        L2[Fixed: 100 USDFC]
-        L3[Total: 8740 USDFC]
-    end
-
-    Rail -.locks.-> L1
-    Rail -.locks.-> L2
-```
-
-**Properties**:
-
-- **One-to-one**: Specific payer to specific payee
-- **Managed**: Operator creates and modifies
-- **Validated**: Optional validator can mediate
-- **Guaranteed**: Lockup ensures payment
-
-### Operator
-
-**What**: Trusted smart contract that manages rails on behalf of payers
-
-**Examples**: WarmStorage contract (storage services), future compute or CDN contracts
-
-**Capabilities**: Create rails, modify rail terms (rate, lockup), settle payments, terminate rails, execute one-time payments
-
-**Constraints**:
-
-- Must be explicitly approved by payer
-- Subject to allowance limits set by payer:
-
-```solidity
-struct ServiceApproval {
-    uint256 rateAllowance;      // Max tokens/epoch across all rails
-    uint256 lockupAllowance;    // Max total lockup
-    uint256 maxLockupPeriod;    // Max lockup period per rail
-}
-```
-
-For SDK implementation of operator approvals, see the [Payment Setup Guide](/synapse-sdk/payments/).
-
-### Validator
-
-**What**: Optional arbitrator that mediates payments and terminations
-
-**Capabilities**:
-
+**Capabilities**: 
 - **Validate settlements**: Adjust payment amounts during settlement
 - **Veto terminations**: Block rail termination attempts
 - **Decide final payout**: Determine total payout after termination
 
-**Use Cases**:
+### Lockup Mechanism
+Each payment rail can be configured to require the payer to lock funds to guarantee future payments. The lockup mechanism ensures providers get paid even if clients abandon their accounts. It's a **safety guarantee**, not a pre-payment.
 
-- Reduce payment if service quality poor
-- Prevent termination if contract terms not met
-- Apply penalties for faults
-
-**In Warm Storage**:
-
-- Currently not used (validator = address(0))
-- Future: Could implement SLA enforcement
-
-## Lockup Mechanism
-
-The lockup mechanism ensures providers get paid even if clients abandon their accounts. It's a **safety guarantee**, not a pre-payment.
-
-### Two Types of Lockup
+This lockup is composed of two distinct components:
 
 **Streaming Lockup** = `paymentRate × lockupPeriod`
 
@@ -173,13 +85,40 @@ The lockup mechanism ensures providers get paid even if clients abandon their ac
 - During normal operation: Acts as minimum balance, payments from general funds
 - After termination: Safety hatch activates, provider can settle from locked funds
 
-**Fixed Lockup**
+**Fixed Lockup** = `lockupFixed`
 
 - Reserved pool for one-time payments
 - Drawn directly when immediate payments needed
 - Reduced as payments are made
 
-### How It Works
+## Payment Flow
+The life circle of a payment rail. 
+
+1) **Funding and approvals**
+   
+   Deposit ERC-20 or FIL into the payer’s internal account
+
+2) **Rail creation and configuration**
+   - Operator `createRail` & Configure lockups via `modifyRailLockup`
+   - Start/adjust streaming via `modifyRailPayment`
+
+3) **Settlement** 
+   - Active rails: can only settle up to payer’s `lockupLastSettledAt`
+   - Terminated rails: can settle up to `endEpoch` using the streaming lockup
+
+4) **Termination and finalization**
+   - Operator can terminate anytime; payer can terminate only if fully funded.
+   - One-time payment window: `lockupFixed` remains spendable until `endEpoch`; leftover is refunded to payer at finalization.
+   - After settlement reaches `endEpoch`, the rail is finalized and zeroed; operator usage is released.
+
+5) **Escape hatch**
+   
+   If a validator malfunctions, the payer can pay in full for the guaranteed window and unlock funds.
+
+**Normal Operation** (before termination): Payments flow from general account funds, lockup remains untouched.
+
+**Safety Hatch** (after termination): Provider can settle up to `endEpoch` using locked funds, even if client account is empty.
+
 
 ```mermaid
 stateDiagram-v2
@@ -191,10 +130,6 @@ stateDiagram-v2
     Settled --> [*]: Lockup released
 ```
 
-**Normal Operation**: Payments flow from general account funds, lockup remains untouched
-
-**Safety Hatch** (after termination): Provider can settle up to `endEpoch` using locked funds, even if client account is empty
-
 **Example**:
 
 ```
@@ -203,8 +138,6 @@ Terminated at epoch 10,000
 Provider can settle through epoch 12,880 using the 2,880 USDFC lockup
 This guarantees payment even if client disappears
 ```
-
-## Payment Flows
 
 ### Normal Operation (Active Rail)
 
@@ -264,47 +197,6 @@ sequenceDiagram
     Payments-->>Payee: Final payment complete
 ```
 
-## Key Operations
-
-The FilecoinPay contract provides these core operations:
-
-### Rail Management
-
-**Create Rail** - Operator establishes payment channel:
-
-```solidity
-function createRail(address payer, address payee, uint256 paymentRate,
-    uint256 lockupPeriod, uint256 lockupFixed, address validator)
-    returns (uint256 railId)
-```
-
-**Modify Rail** - Operator adjusts payment terms:
-
-```solidity
-function modifyRailPayment(uint256 railId, uint256 newPaymentRate, uint256 oneTimePayment);
-function modifyRailLockup(uint256 railId, uint256 newLockupPeriod, uint256 newLockupFixed);
-```
-
-**Terminate Rail** - Payer or operator ends payment channel:
-
-```solidity
-function terminateRail(uint256 railId)
-```
-
-### Settlement
-
-**Settle Rail** - Anyone can trigger payment settlement:
-
-```solidity
-function settleRail(uint256 railId, uint256 targetEpoch)
-```
-
-- Active rails: Settle from general funds up to payer's funded epochs
-- Terminated rails: Settle from locked funds up to `endEpoch` (safety hatch)
-- Optional validator can adjust payment amounts
-
-For SDK implementation and examples, see the [Payment Guides](/synapse-sdk/payments/).
-
 ## Security Properties
 
 **Safety Guarantees**:
@@ -320,33 +212,6 @@ For SDK implementation and examples, see the [Payment Guides](/synapse-sdk/payme
 - Providers trust lockup mechanism for payment guarantees
 - Both parties can optionally trust validators for dispute resolution
 - All trust relationships are explicit and on-chain
-
-## For Different Audiences
-
-:::tip[SDK Users - Implementing Payments]
-You want to use FilecoinPay in your application:
-
-- [**Payment Setup Guide**](/synapse-sdk/payments/) - Fund accounts and approve operators
-- [**Monitor Usage Guide**](/synapse-sdk/payments/storage-monitoring/) - Track payment health
-- [**Troubleshooting Guide**](/synapse-sdk/payments/troubleshooting) - Common issues
-:::
-
-:::note[Contract Developers - Building Services]
-You want to build a service that uses FilecoinPay:
-
-- Study the FilecoinPay contract source code
-- Implement the operator pattern
-- Consider validator integration for SLAs
-- See WarmStorage as a reference implementation
-:::
-
-:::info[Protocol Researchers - Understanding Design]
-You want to understand the protocol deeply:
-
-- [**FilecoinPay Cookbook**](/core-concepts/filecoin-pay-cookbook) - Use cases and patterns
-- [**System Architecture**](/core-concepts/architecture) - Integration with storage and PDP
-- Review the FilecoinPay contract implementation
-:::
 
 ## Summary
 
