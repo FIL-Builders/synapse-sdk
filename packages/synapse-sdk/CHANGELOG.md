@@ -4,6 +4,76 @@
 
 * add terminateDataSet functionality ([#230](https://github.com/FilOzone/synapse-sdk/issues/230)) ([ffaacac](https://github.com/FilOzone/synapse-sdk/commit/ffaacac507b4882abfc33d3de72fe9fa98843cd2))
 
+## [0.36.0](https://github.com/FIL-Builders/synapse-sdk/compare/synapse-sdk-v0.35.0...synapse-sdk-v0.36.0) (2025-10-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* create dataset and add pieces ([#357](https://github.com/FIL-Builders/synapse-sdk/issues/357))
+
+### Features
+
+* add `WarmStorageService#topUpCDNPaymentRails` ([#332](https://github.com/FIL-Builders/synapse-sdk/issues/332)) ([3a07ed8](https://github.com/FIL-Builders/synapse-sdk/commit/3a07ed848935c258b20aff9a90edf3c999798b1b))
+* add new provider filters ([#309](https://github.com/FIL-Builders/synapse-sdk/issues/309)) ([f71a7f1](https://github.com/FIL-Builders/synapse-sdk/commit/f71a7f19f34110588bfe28da8baf80b7e910b4bd))
+* add piece deletion to storage context ([#285](https://github.com/FIL-Builders/synapse-sdk/issues/285)) ([ac946dc](https://github.com/FIL-Builders/synapse-sdk/commit/ac946dce9dbbc77d9d559532ba0c4d8ebeafcd09))
+* add session key support ([#209](https://github.com/FIL-Builders/synapse-sdk/issues/209)) ([0b0c983](https://github.com/FIL-Builders/synapse-sdk/commit/0b0c9836ef6d355cb74a3daa28d616c413be10cb))
+* allowing deposits to secondary addresses ([4629f1f](https://github.com/FIL-Builders/synapse-sdk/commit/4629f1fd1d3e5b2ef66164dbf3321640854d5fce))
+* better curio error and polling ([#344](https://github.com/FIL-Builders/synapse-sdk/issues/344)) ([d4d44c6](https://github.com/FIL-Builders/synapse-sdk/commit/d4d44c6de5001e4f58eb36753b95904971492ce1)), closes [#331](https://github.com/FIL-Builders/synapse-sdk/issues/331)
+* create dataset and add pieces ([#357](https://github.com/FIL-Builders/synapse-sdk/issues/357)) ([662904d](https://github.com/FIL-Builders/synapse-sdk/commit/662904d83ca1e2eac706b9e1ec6d6d0299dbbbba)), closes [#264](https://github.com/FIL-Builders/synapse-sdk/issues/264)
+* create low-level create-and-add API ([#347](https://github.com/FIL-Builders/synapse-sdk/issues/347)) ([755398b](https://github.com/FIL-Builders/synapse-sdk/commit/755398b84a82a1a4e44d1056a621954245388137))
+* delete piece errors ([#354](https://github.com/FIL-Builders/synapse-sdk/issues/354)) ([f57cc6a](https://github.com/FIL-Builders/synapse-sdk/commit/f57cc6af41086694b21289cba78ed1c11ae7360a))
+* deposit to any address ([#316](https://github.com/FIL-Builders/synapse-sdk/issues/316)) ([4629f1f](https://github.com/FIL-Builders/synapse-sdk/commit/4629f1fd1d3e5b2ef66164dbf3321640854d5fce))
+* excludeProviderIds ([#317](https://github.com/FIL-Builders/synapse-sdk/issues/317)) ([229710a](https://github.com/FIL-Builders/synapse-sdk/commit/229710ad87990a50ddb0cd9df8670b8cf30cdd61))
+* getSizeFromPieceCID(cid) to extract size from PieceCIDv2 ([#283](https://github.com/FIL-Builders/synapse-sdk/issues/283)) ([5fac7a6](https://github.com/FIL-Builders/synapse-sdk/commit/5fac7a697db438ddb6023f14868d6bd4ca963bb9))
+* PDPServer#getPieceStatus(pieceCid) ([#315](https://github.com/FIL-Builders/synapse-sdk/issues/315)) ([fb45df4](https://github.com/FIL-Builders/synapse-sdk/commit/fb45df485f73b739b29e0c643d2124d229679c01))
+* Random clientDataSetId ([#298](https://github.com/FIL-Builders/synapse-sdk/issues/298)) ([7630179](https://github.com/FIL-Builders/synapse-sdk/commit/763017978d2f10d4a27f042a0163d0cd91cd8b81))
+* reset versioning to continue 0.x development ([ce58d21](https://github.com/FIL-Builders/synapse-sdk/commit/ce58d215492a8a80f836d9451655b8b70d680f2a))
+* **ServiceProviderRegistry:** support latest ABI ([#364](https://github.com/FIL-Builders/synapse-sdk/issues/364)) ([a34dacc](https://github.com/FIL-Builders/synapse-sdk/commit/a34dacc0ecd470a06bc98148ea9f72cf85caf5ab))
+* SessionKeyRegistry.login: origin ([#318](https://github.com/FIL-Builders/synapse-sdk/issues/318)) ([3d8a328](https://github.com/FIL-Builders/synapse-sdk/commit/3d8a328d52566a2a3355aa2b38974ad0df24939b))
+* **sp-tool:** add full PDP offering updates and capabilities ([#294](https://github.com/FIL-Builders/synapse-sdk/issues/294)) ([e71fb8c](https://github.com/FIL-Builders/synapse-sdk/commit/e71fb8ca43d1f0f8621cf424529681370167a8d0))
+* Update ABI ([#303](https://github.com/FIL-Builders/synapse-sdk/issues/303)) ([328ae43](https://github.com/FIL-Builders/synapse-sdk/commit/328ae43d7cb204c6010e111c6b23dfb779a45917))
+* update to latest abi, including SP registry changes ([#361](https://github.com/FIL-Builders/synapse-sdk/issues/361)) ([a2c2dea](https://github.com/FIL-Builders/synapse-sdk/commit/a2c2dea1adc12281d68668e57b4deee22a9827e1))
+* use random nonce for AddPieces operations ([80eebea](https://github.com/FIL-Builders/synapse-sdk/commit/80eebea0c148bbdec9d6e485cf07c40d88009e82))
+
+
+### Bug Fixes
+
+* clean up synapse-sdk readme ([8a7f949](https://github.com/FIL-Builders/synapse-sdk/commit/8a7f949b90e3e0e196247dd7a006d8e7dab9a11f))
+* generate-abi from correct contracts git tag ([#279](https://github.com/FIL-Builders/synapse-sdk/issues/279)) ([742c041](https://github.com/FIL-Builders/synapse-sdk/commit/742c041c355b41f5b14af53aa5ef956913fc79bf))
+* getPDPService always returns a pdpOffering ([#324](https://github.com/FIL-Builders/synapse-sdk/issues/324)) ([42389da](https://github.com/FIL-Builders/synapse-sdk/commit/42389da5a67ab503f5a76c055eace9b499c49a14))
+* **mocks:** mock BatchJsonrpc errors with their request `id` ([#338](https://github.com/FIL-Builders/synapse-sdk/issues/338)) ([1167900](https://github.com/FIL-Builders/synapse-sdk/commit/1167900aa117026d084842708b760eb1f3ffd203))
+* more careful checks for EIP-1193 provider ([#290](https://github.com/FIL-Builders/synapse-sdk/issues/290)) ([bfeee48](https://github.com/FIL-Builders/synapse-sdk/commit/bfeee489ee2df9d86b6c940ef28a0049bf78b273))
+* multi-uploads, smarter batching, handle multiple files in example ([#301](https://github.com/FIL-Builders/synapse-sdk/issues/301)) ([3d41d21](https://github.com/FIL-Builders/synapse-sdk/commit/3d41d218fb8c9b8ee27534d8f0fd6fbf1fed0eac))
+* resolves bug of using client address instead of signer for datsetId lookup ([328ae43](https://github.com/FIL-Builders/synapse-sdk/commit/328ae43d7cb204c6010e111c6b23dfb779a45917))
+* resolves bug of using client address instead of signer for datsetId lookup ([7320c2b](https://github.com/FIL-Builders/synapse-sdk/commit/7320c2b3405125df17c33e19270a9dd09915b3e9))
+* update lockup period from 10 to 30 days ([34362fa](https://github.com/FIL-Builders/synapse-sdk/commit/34362fa215dd3500823d814475cd93ee17a11474))
+* update package.json paths to use 'dist/src' directory ([625b269](https://github.com/FIL-Builders/synapse-sdk/commit/625b2699266a42a272bc27af3127475fee107b28))
+* use bigint in PDP auth, clientDataSetId now needs to be large ([620b32e](https://github.com/FIL-Builders/synapse-sdk/commit/620b32efb7d3710abc3dadbdc8dd4122fa2b1148))
+* Use clientAddress for next dataset ID ([#299](https://github.com/FIL-Builders/synapse-sdk/issues/299)) ([7320c2b](https://github.com/FIL-Builders/synapse-sdk/commit/7320c2b3405125df17c33e19270a9dd09915b3e9))
+* use providerId or providerAddress if provided with forceCreateDataSet ([#314](https://github.com/FIL-Builders/synapse-sdk/issues/314)) ([9d717d3](https://github.com/FIL-Builders/synapse-sdk/commit/9d717d3cd234a13c258e450e3c18a459feb6ae3c))
+
+
+### Chores
+
+* **master:** release synapse-sdk 0.29.2 ([#248](https://github.com/FIL-Builders/synapse-sdk/issues/248)) ([7cff497](https://github.com/FIL-Builders/synapse-sdk/commit/7cff497fe934704cbf02a72eeb83a078eb0b1bf7))
+* **master:** release synapse-sdk 0.29.3 ([#270](https://github.com/FIL-Builders/synapse-sdk/issues/270)) ([6ddbac3](https://github.com/FIL-Builders/synapse-sdk/commit/6ddbac3e1d9087391b1dbe99191da7ff396ec41b))
+* **master:** release synapse-sdk 0.30.0 ([#288](https://github.com/FIL-Builders/synapse-sdk/issues/288)) ([4c3170a](https://github.com/FIL-Builders/synapse-sdk/commit/4c3170a11040de429479dccdc8cad39aca2026cf))
+* **master:** release synapse-sdk 0.30.1 ([#292](https://github.com/FIL-Builders/synapse-sdk/issues/292)) ([5a35d43](https://github.com/FIL-Builders/synapse-sdk/commit/5a35d4328f8fc84c8ff038d74ff12cca117f04f6))
+* **master:** release synapse-sdk 0.31.0 ([#295](https://github.com/FIL-Builders/synapse-sdk/issues/295)) ([eeaf91d](https://github.com/FIL-Builders/synapse-sdk/commit/eeaf91d5e9c338c82ab34e921c7a7b1610354e02))
+* **master:** release synapse-sdk 0.31.1 ([#300](https://github.com/FIL-Builders/synapse-sdk/issues/300)) ([5a6bd39](https://github.com/FIL-Builders/synapse-sdk/commit/5a6bd39c2f8eb3b1fcf777fbaa67a97961e52920))
+* **master:** release synapse-sdk 0.32.0 ([#310](https://github.com/FIL-Builders/synapse-sdk/issues/310)) ([e7b2928](https://github.com/FIL-Builders/synapse-sdk/commit/e7b292830bee8dbba0566507a6d218f0e570fbdf))
+* **master:** release synapse-sdk 0.33.0 ([#313](https://github.com/FIL-Builders/synapse-sdk/issues/313)) ([101c457](https://github.com/FIL-Builders/synapse-sdk/commit/101c457bc47e0facba8fcc6d7dc3a9228e689431))
+* **master:** release synapse-sdk 0.34.0 ([2a7f532](https://github.com/FIL-Builders/synapse-sdk/commit/2a7f532a199a63bd90989ef56ec22b1ddf116968))
+* **master:** release synapse-sdk 0.35.0 ([#342](https://github.com/FIL-Builders/synapse-sdk/issues/342)) ([2765030](https://github.com/FIL-Builders/synapse-sdk/commit/27650305eac477466fd507d025dee92aeff8c00b))
+* merge core and react ([#335](https://github.com/FIL-Builders/synapse-sdk/issues/335)) ([0e0262b](https://github.com/FIL-Builders/synapse-sdk/commit/0e0262b5a0f5aa7d41b907b5a81dfd7d53c51905))
+* monorepo seyup ([#267](https://github.com/FIL-Builders/synapse-sdk/issues/267)) ([13e527c](https://github.com/FIL-Builders/synapse-sdk/commit/13e527c05fa803791217b1bc51de1ccf67b44e9a))
+* update ABIs for next contracts ([6f1ebda](https://github.com/FIL-Builders/synapse-sdk/commit/6f1ebdae6abbc06c8e9701a33e5e94b5cf7dbef0))
+* update for M3 contracts ([52f841c](https://github.com/FIL-Builders/synapse-sdk/commit/52f841cbe3da4ee143ef710426d3cff61a80d08f))
+* update for M3 contracts ([52f841c](https://github.com/FIL-Builders/synapse-sdk/commit/52f841cbe3da4ee143ef710426d3cff61a80d08f))
+* update mock service worker package version to 2.10.5 ([e201a48](https://github.com/FIL-Builders/synapse-sdk/commit/e201a483c24a4527afe610c1a23f46eb6d124268))
+* update to M3 calibnet contracts in next-branch ([#319](https://github.com/FIL-Builders/synapse-sdk/issues/319)) ([52f841c](https://github.com/FIL-Builders/synapse-sdk/commit/52f841cbe3da4ee143ef710426d3cff61a80d08f))
+* v0.35.0-dev.1 (next) ([1e43029](https://github.com/FIL-Builders/synapse-sdk/commit/1e430299dcbd8909d3af632d73f443ca8d587427))
+
 ## [0.35.0](https://github.com/FilOzone/synapse-sdk/compare/synapse-sdk-v0.34.0...synapse-sdk-v0.35.0) (2025-10-29)
 
 
