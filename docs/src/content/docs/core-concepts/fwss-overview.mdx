@@ -1,51 +1,66 @@
 ---
-title: Warm Storage
-description: Learn about the Filecoin Warm Storage Service.
+title: Filecoin Warm Storage Service
+description: The warm storage layer of the Filecoin Onchain Cloud — optimized for frequent retrieval, verifiable availability, and live application use-cases.
 sidebar:
-  order: 5
+  order: 4
 ---
 
-## What is Warm Storage?
+**Filecoin Warm Storage Service (FWSS)** is designed to provide a serviceable, verifiable data‐storage tier within the Filecoin Onchain Cloud, positioned between traditional cold archival storage and ultra‐hot caching.
 
-**Filecoin Warm Storage Service (FWSS)** is the **business logic and coordination layer** that sits on top of the neutral PDP and Payments protocols to create a complete storage marketplace.
+## What is FWSS?
 
-Warm Storage is the application layer in the [**three-layer architecture**](/core-concepts/architecture#architectural-principles), combining the neutral PDP protocol and generic FilecoinPay infrastructure into a complete storage service.
+**Filecoin Warm Storage Service (FWSS)** enables datasets to be stored, verified, retrieved and billed in a live fashion: providers continuously demonstrate possession (via PDP), clients access data with lower latency, and payments are triggered via on-chain service contracts.
 
-:::tip[Choose Your Path]
-- **SDK Users**: Focus on the high-level concepts, then jump to [Synapse SDK guides](/synapse-sdk/)
-- **Smart Contract Developers**: Study the PDPListener integration and EIP-712 authentication
-- **Protocol Researchers**: Deep dive into the metadata system and fault handling patterns
-:::
+This service transforms Filecoin from an archival storage network into a data service layer suitable for real-time applications, analytics, and content-heavy workflows.
 
-### Why "Warm Storage"?
+**(FWSS)** also represents a complete implementation of the Filecoin Onchain Cloud stack, demonstrating how to combine PDP and the FilecoinPay contracts to create a marketplace for warm storage with instant retrieval guarantees powered by FilBeam.
 
-**Warm Storage** refers to data that needs to be:
+**Filecoin Warm Storage Service (FWSS)** refers to data that needs to be:
 
-- ✅ **Accessible**: Available for retrieval within minutes
-- ✅ **Verified**: Cryptographically proven to exist
+- ✅ **Accessible**: Available for fast storage and retrieval
+- ✅ **Verified**: Continuous verifiability with cryptographically proven
 - ✅ **Affordable**: Less expensive than "hot" (CDN) storage
-- ✅ **Reliable**: Guaranteed to persist with payment backing
+- ✅ **Reliable**: Integration with onchain payment rail using Filecoin Pay
 
-Compared to:
+Together, FWSS enables builders to depend on Filecoin not only for “store and forget,” but for “store and serve” in a verifiable, programmable manner.
 
-- **Hot Storage**: Instant access, CDN-backed, higher cost
-- **Cold Storage**: Archived data, slower retrieval, lowest cost
-
-### Core Responsibilities
+#### **Core Responsibilities**
 
 WarmStorage manages the complete storage marketplace:
 
-1. **Client Authentication**: Validates all client operations via EIP-712 signatures (see [Authentication Flow](#authentication-flow))
-2. **Payment Coordination**: Automatically creates and manages [payment rails](/core-concepts/filecoin-pay-overview)
-3. **Cost Calculation**: Determines pricing based on size, duration, and CDN usage (see [Pricing and Cost Calculation](#pricing-and-cost-calculation))
-4. **Metadata Management**: Stores data set and piece metadata for discovery (see [Metadata System](#metadata-system))
-5. **Fault Handling**: Integrates [PDP verification](/core-concepts/pdp-overview) results with payment adjustments
+1. **Client Authentication**: Validates all client operations via EIP-712 signaturess.
+2. **Payment Coordination**: Automatically creates and manages payment rails between clients and service providers.
+3. **Cost Calculation**: Determines pricing based on size, duration, and CDN usage.
+4. **Metadata Management**: Stores data set and piece metadata for discovery.
+5. **Fault Handling**: Integrates PDP verification results with payment adjustments
 
-## PDPListener Integration
+## How FWSS works
+**Filecoin Warm Storage Service (FWSS)** combines PDP (Proof of Data Possession) verification with integrated payment rails using Filecoin Pay to offer dataSet management for developers.
 
-### Callback Pattern
+```mermaid
+graph LR
+    A[FilecoinWarmStorage<br/>Service]
+    B[PDP]
+    C[Filecoin Pay]
+    D[Storage Providers]
 
-WarmStorage implements `PDPListener` to receive events from PDPVerifier:
+    A <--> B
+    A <--> C
+    B <--> D
+    C --> D
+
+```
+
+### PDP Integration (*`PDPListener`*)
+
+The Filecoin Warm Storage Service integrates with the **Proof of Data Possession (PDP)** protocol to enable verifiable, continuous data availability on Filecoin Onchain Cloud. This integration enables automatic payment rail management based on storage operations.
+
+- **Validate storage operations**: Ensure only authorized clients create data sets
+- **Track data lifecycle**: Monitor when pieces are added and managed
+- **Enforce service quality**: Receive proof results to trigger payment adjustments
+- **Maintain accountability**: Respond to proof failures by applying penalties
+
+Using the callback design pattern, FWSS implements `PDPListener` to receive events from `PDPVerifier` to extend the logics for the complete lifecycle of data sets. 
 
 ```solidity
 interface PDPListener {
@@ -56,34 +71,9 @@ interface PDPListener {
 }
 ```
 
-**Why callbacks?**:
+##### *`dataSetCreated()`*
 
-- PDPVerifier stays neutral (no business logic)
-- WarmStorage adds storage-specific behavior
-- Separation of concerns
-- Extensible design
-
-### dataSetCreated
-
-**Triggered**: When new data set created in PDPVerifier
-
-**Purpose**: Set up payment infrastructure and validate client
-
-```mermaid
-sequenceDiagram
-    participant PDPVerifier
-    participant WarmStorage
-    participant Payments
-
-    PDPVerifier->>WarmStorage: dataSetCreated(dataSetId, creator, signature)
-    WarmStorage->>WarmStorage: 1. Validate signature<br/>(recover client address)
-    WarmStorage->>WarmStorage: 2. Check operator approval<br/>(client approved WarmStorage?)
-    WarmStorage->>WarmStorage: 3. Store data set metadata<br/>(up to 10 key-value pairs)
-    WarmStorage->>Payments: 4. createRail(client, provider, rate, lockup)
-    Payments-->>WarmStorage: railId
-    WarmStorage->>WarmStorage: 5. Associate rail with data set
-    WarmStorage-->>PDPVerifier: Success
-```
+When a new data set is created in `PDPVerifier`, this function is called to set up payment infrastructure and validate the client operation.
 
 **Key actions**:
 
@@ -91,98 +81,27 @@ sequenceDiagram
 2. **Operator check**: Verify client has approved WarmStorage
 3. **Metadata storage**: Save data set metadata (category, project, etc.)
 4. **Payment rail creation**: Establish automated payment channel
-5. **Association**: Link rail ID to data set ID
 
-### piecesAdded
+##### *`piecesAdded()`*
 
-**Triggered**: When pieces added to existing data set
+When pieces are added to an existing dataset, this function is called to store piece metadata and update payment rail configuration if needed.
 
-**Purpose**: Store piece metadata and update payment rail if needed
+**Key actions for first dataSet**:
 
-```solidity
-function piecesAdded(
-    uint256 dataSetId,
-    uint256 firstAdded,
-    Cids.Cid[] memory pieceData,
-    bytes calldata extraData  // Contains signature
-) external override {
-    // 1. Validate signature
-    address signer = _validateSignature(extraData, ...);
-    require(signer == dataSetOwner, "Unauthorized");
-
-    // 2. Store piece metadata (up to 5 keys per piece)
-    for (uint256 i = 0; i < pieceData.length; i++) {
-        storePieceMetadata(dataSetId, pieceData[i], metadata[i]);
-    }
-
-    // 3. Update payment rail if storage requirements increased
-    if (needsMorePayment) {
-        payments.modifyRailPayment(railId, newRate, 0);
-    }
-}
-```
-
-**First piece special case**:
-
-- If data set has no prior pieces, rail created here
 - Payment rail creation deferred to first piece upload
 - Enables data sets without immediate storage
 
-### Proof Callbacks
+##### *`possessionProven()`*
 
-WarmStorage implements two callbacks for proof handling:
+When a storage provider successfully completes a proof verification, this function is called to record the successful proof completion.
 
-#### possessionProven
+##### *`nextProvingPeriod()`*
 
-**Triggered**: After successful proof verification
+When a proof window expires without a valid proof (indicating a fault), this function is called to handle the failure and apply penalties.
 
-**Purpose**: Record successful proof completion
+### Filecoin Pay Integration ( *`IValidator`*)
 
-```solidity
-function possessionProven(
-    uint256 dataSetId,
-    uint256 challengedLeafCount,
-    uint256 seed,
-    uint256 challengeCount
-) external override {
-    // Record successful proof
-    // Update provider performance metrics
-    // Emit event for monitoring
-}
-```
-
-#### nextProvingPeriod
-
-**Triggered**: When proof window expires without valid proof (fault)
-
-**Purpose**: Handle proof failures and apply penalties
-
-```solidity
-function nextProvingPeriod(
-    uint256 dataSetId,
-    uint256 challengeEpoch,
-    uint256 leafCount,
-    bytes calldata extraData
-) external override {
-    // Fault detected
-    // Future: Implement penalties via payment rail adjustments
-    // Example: Reduce payment rate, apply one-time penalty
-    // Emit event for monitoring
-}
-```
-
-**Current implementation**: Logs faults, no penalties yet
-
-**Future enhancements**:
-
-- Reduce payment rate on repeated faults
-- Apply fixed penalties from lockup pool
-- Auto-terminate rail after threshold faults
-- Provider reputation scoring
-
-## IValidator Integration
-
-Warm Storage implements the `IValidator` interface from FilecoinPay to mediate payments based on proof results.
+Filecoin Warm Storage Service implements the `IValidator` interface from **Filecoin Pay** to  act as payment **validator** to manage payment rails for different service types, implementing dynamic rate calculation and fault-based arbitration.
 
 - Reduce payments when proofs fail
 - Apply penalties for repeated faults
@@ -190,96 +109,18 @@ Warm Storage implements the `IValidator` interface from FilecoinPay to mediate p
 - Implement custom SLA enforcement
 - Pay only for proven epochs
 
-**Example validator function**:
+This integration allows the service layer to automatically enforce quality of service through payment adjustments. 
 
-```solidity
-function validatePayment(
-    uint256 railId,
-    uint256 proposedAmount,
-    uint256 fromEpoch,
-    uint256 toEpoch,
-    uint256 rate
-) external returns (ValidationResult memory result) {
-    // Check fault history for this rail
-    // Adjust payment based on proof success rate
-    // Return validated amount (could be less than proposed)
-}
-```
+### Service Specific Logic
 
-This integration allows the service layer to automatically enforce quality of service through payment adjustments.
+Beyond the PDP and Filecoin Pay integrations, FWSS implements critical business logic that orchestrates the entire warm storage marketplace. These service-specific components handle the operational lifecycle from service provider onboarding to automated billing, ensuring quality control, security, and seamless payment coordination across all data management operations.
 
-:::note[Validator Status]
-The IValidator integration is **planned for future implementation**. Currently, WarmStorage logs faults but does not apply payment penalties. Future versions will implement SLA enforcement through payment adjustments.
-:::
+The key areas of service-specific logic include:
+- **Provider registration and approval workflow**: Curated whitelist management for quality assurance in `ServiceProviderRegistry.sol`.
+- **Client dataset creation with CDN integration options**: Flexible storage tier selection and configuration
+- **Automated cost calculation**: Dynamic pricing based on data size, duration, and service tiers
 
-## Security Boundaries
-
-**Authentication Boundaries**:
-- WarmStorage authenticates all client operations via EIP-712 signatures
-- Never trusts off-chain requests without cryptographic signatures
-- Client signatures must be validated before any state changes
-
-**Contract Boundaries**:
-- PDPVerifier owns proof verification logic; WarmStorage reacts to callbacks
-- FilecoinPay owns token accounting; WarmStorage requests changes within allowances
-- WarmStorage owns metadata and pricing; other contracts cannot modify directly
-
-**Trust Model**:
-- Clients trust approved operators (WarmStorage) to create fair payment rails
-- Providers trust lockup mechanism for payment guarantees
-- Both parties trust PDPVerifier for neutral proof verification
-- All trust relationships are explicit and on-chain
-
-## Metadata System
-
-### Data Set Metadata
-
-**Purpose**: Categorize and organize data sets
-
-**Constraints**:
-
-- Maximum 10 key-value pairs per data set
-- Keys: max 32 characters
-- Values: max 128 characters
-- Stored on-chain (accessible to all)
-
-**Common use cases**:
-
-```typescript
-{
-  category: 'videos',           // Content type
-  project: 'myapp',             // Application name
-  environment: 'production',    // Stage
-  owner: 'alice',               // Human-readable owner
-  description: 'User uploads'   // Purpose
-}
-```
-
-### Piece Metadata
-
-**Purpose**: Track individual file information
-
-**Constraints**:
-
-- Maximum 5 key-value pairs per piece
-- Same size limits as data set metadata
-- Stored per piece within data set
-
-**Common use cases**:
-
-```typescript
-{
-  filename: 'video.mp4',        // Original filename
-  size: '10485760',             // Size in bytes
-  contentType: 'video/mp4',     // MIME type
-  uploadedBy: 'user123',        // Uploader ID
-  timestamp: '1234567890'       // Upload time
-}
-```
-
-## Pricing and Cost Calculation
-
-### Two-Tier Pricing
+#### Two-Tier Pricing
 
 **Base Storage** (`pricePerEpochPerByte`):
 
@@ -293,31 +134,16 @@ The IValidator integration is **planned for future implementation**. Currently, 
 - Retrieval latency: milliseconds
 - Higher cost, for performance-critical data
 
-### Pricing Model Inputs
-
-**Storage Cost Calculation**:
-- **Size**: Total bytes across all pieces in data set
-- **Duration**: Number of epochs to store (minimum 1 epoch)
-- **CDN Usage**: Whether pieces require CDN access
-- **Rate**: `size × epochs × (basePrice + cdnPrice)`
-
-**Allowance Requirements**:
-- **Rate Allowance**: Maximum tokens per epoch across all rails
-- **Lockup Allowance**: Maximum total lockup amount
-- **Lockup Period**: Maximum lockup duration per rail
-
 :::note[Current Pricing]
 Pricing is set by the WarmStorage contract and can be queried via `getServicePrice()`. Users must approve sufficient allowances before creating storage contexts.
 :::
 
 
-## Complete Upload Flow
+### Complete Upload Flow
 
 :::note[System-Wide Flow]
 This diagram shows the complete upload flow from the Warm Storage perspective. For how all components interact architecturally, see [**System Architecture - Data Flow Examples**](/core-concepts/architecture#data-flow-examples).
 :::
-
-### Step-by-Step Process
 
 ```mermaid
 sequenceDiagram
@@ -370,40 +196,10 @@ sequenceDiagram
 
 ## Summary
 
-**Filecoin Warm Storage Service**:
+FWSS enables the Filecoin Onchain Cloud to behave not just as a passive archive, but as a live data service:
 
-- Business logic layer combining PDP + Payments
-- Orchestrates decentralized storage marketplace
-- Manages authentication, providers, pricing, metadata
-- Automatically creates and manages payment rails
+- Storage providers are continuously verified via PDP
+- Clients gain access to retrievable, service‐ready data
+- Payments are automated via onchain rails linked to proof events
 
-**Key Components**:
-
-- **Client Authentication**: EIP-712 signatures for all operations
-- **Payment Coordination**: Automated rail creation and updates
-- **Metadata System**: On-chain data set and piece organization
-- **PDPListener Integration**: Responds to verification events
-
-**Security**:
-
-- EIP-712 signature validation
-- Operator approval model with allowances
-- Payment lockup guarantees
-- Transparent on-chain operations
-
-**Integration**:
-
-- SDK handles all complexity automatically
-- Address discovery via WarmStorage
-- Simple upload/download API
-- Comprehensive cost calculation
-- Metadata for organization and discovery
-
-## Next Steps
-
-Now that you understand Warm Storage:
-
-- [**Developer Guides**](/synapse-sdk/) - Build applications with the SDK
-- [**Storage Guide**](/synapse-sdk/storage/) - Upload and download files
-- [**Payments Guide**](/synapse-sdk/payments/) - Manage deposits and allowances
-- [**Architecture**](/core-concepts/architecture) - Deep dive into system design
+By linking upload, proof, retrieval, and payment, FWSS delivers cloud-style storage with blockchain‐grade guarantees.
