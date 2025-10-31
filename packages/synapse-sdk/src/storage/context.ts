@@ -28,6 +28,7 @@ import type { ethers } from 'ethers'
 import type { Hex } from 'viem'
 import type { PaymentsService } from '../payments/index.ts'
 import { PDPAuthHelper, PDPServer } from '../pdp/index.ts'
+import { PDPVerifier } from '../pdp/verifier.ts'
 import { asPieceCID } from '../piece/index.ts'
 import { SPRegistryService } from '../sp-registry/index.ts'
 import type { ProviderInfo } from '../sp-registry/types.ts'
@@ -55,7 +56,6 @@ import {
   timeUntilEpoch,
 } from '../utils/index.ts'
 import { combineMetadata, metadataMatches, objectToEntries, validatePieceMetadata } from '../utils/metadata.ts'
-import { ProviderResolver } from '../utils/provider-resolver.ts'
 import type { WarmStorageService } from '../warm-storage/index.ts'
 
 export class StorageContext {
@@ -184,18 +184,12 @@ export class StorageContext {
     warmStorageService: WarmStorageService,
     options: StorageServiceOptions = {}
   ): Promise<StorageContext> {
-    // Create SPRegistryService and ProviderResolver
+    // Create SPRegistryService
     const registryAddress = warmStorageService.getServiceProviderRegistryAddress()
     const spRegistry = new SPRegistryService(synapse.getProvider(), registryAddress)
-    const providerResolver = new ProviderResolver(warmStorageService, spRegistry)
 
     // Resolve provider and data set based on options
-    const resolution = await StorageContext.resolveProviderAndDataSet(
-      synapse,
-      warmStorageService,
-      providerResolver,
-      options
-    )
+    const resolution = await StorageContext.resolveProviderAndDataSet(synapse, warmStorageService, spRegistry, options)
 
     // Notify callback about provider selection
     try {
@@ -230,7 +224,7 @@ export class StorageContext {
   private static async resolveProviderAndDataSet(
     synapse: Synapse,
     warmStorageService: WarmStorageService,
-    providerResolver: ProviderResolver,
+    spRegistry: SPRegistryService,
     options: StorageServiceOptions
   ): Promise<ProviderSelectionResult> {
     const client = synapse.getClient()
@@ -241,7 +235,7 @@ export class StorageContext {
       return await StorageContext.resolveByDataSetId(
         options.dataSetId,
         warmStorageService,
-        providerResolver,
+        spRegistry,
         clientAddress,
         options
       )
@@ -257,7 +251,7 @@ export class StorageContext {
         options.providerId,
         requestedMetadata,
         warmStorageService,
-        providerResolver,
+        spRegistry,
         options.forceCreateDataSet
       )
     }
@@ -267,7 +261,7 @@ export class StorageContext {
       return await StorageContext.resolveByProviderAddress(
         options.providerAddress,
         warmStorageService,
-        providerResolver,
+        spRegistry,
         clientAddress,
         requestedMetadata,
         options.forceCreateDataSet
@@ -279,7 +273,7 @@ export class StorageContext {
       clientAddress,
       requestedMetadata,
       warmStorageService,
-      providerResolver,
+      spRegistry,
       options.excludeProviderIds,
       options.forceCreateDataSet,
       options.withIpni,
@@ -293,7 +287,7 @@ export class StorageContext {
   private static async resolveByDataSetId(
     dataSetId: number,
     warmStorageService: WarmStorageService,
-    providerResolver: ProviderResolver,
+    spRegistry: SPRegistryService,
     signerAddress: string,
     options: StorageServiceOptions
   ): Promise<ProviderSelectionResult> {
@@ -312,16 +306,16 @@ export class StorageContext {
 
     // Validate consistency with other parameters if provided
     if (options.providerId != null || options.providerAddress != null) {
-      await StorageContext.validateDataSetConsistency(dataSet, options, providerResolver)
+      await StorageContext.validateDataSetConsistency(dataSet, options, spRegistry)
     }
 
     // Look up provider by ID from the data set
-    const provider = await providerResolver.getApprovedProvider(dataSet.providerId)
+    const provider = await spRegistry.getProvider(dataSet.providerId)
     if (provider == null) {
       throw createError(
         'StorageContext',
         'resolveByDataSetId',
-        `Provider ID ${dataSet.providerId} for data set ${dataSetId} is not currently approved`
+        `Provider ID ${dataSet.providerId} for data set ${dataSetId} not found in registry`
       )
     }
 
@@ -352,7 +346,7 @@ export class StorageContext {
   private static async validateDataSetConsistency(
     dataSet: EnhancedDataSetInfo,
     options: StorageServiceOptions,
-    providerResolver: ProviderResolver
+    spRegistry: SPRegistryService
   ): Promise<void> {
     // Validate provider ID if specified
     if (options.providerId != null) {
@@ -369,7 +363,7 @@ export class StorageContext {
     // Validate provider address if specified
     if (options.providerAddress != null) {
       // Look up the actual provider to get its serviceProvider address
-      const actualProvider = await providerResolver.getApprovedProvider(dataSet.providerId)
+      const actualProvider = await spRegistry.getProvider(dataSet.providerId)
       if (
         actualProvider == null ||
         actualProvider.serviceProvider.toLowerCase() !== options.providerAddress.toLowerCase()
@@ -392,17 +386,17 @@ export class StorageContext {
     providerId: number,
     requestedMetadata: Record<string, string>,
     warmStorageService: WarmStorageService,
-    providerResolver: ProviderResolver,
+    spRegistry: SPRegistryService,
     forceCreateDataSet?: boolean
   ): Promise<ProviderSelectionResult> {
     // Fetch provider (always) and dataSets (only if not forcing) in parallel
     const [provider, dataSets] = await Promise.all([
-      providerResolver.getApprovedProvider(providerId),
+      spRegistry.getProvider(providerId),
       forceCreateDataSet ? Promise.resolve(null) : warmStorageService.getClientDataSetsWithDetails(signerAddress),
     ])
 
     if (provider == null) {
-      throw createError('StorageContext', 'resolveByProviderId', `Provider ID ${providerId} is not currently approved`)
+      throw createError('StorageContext', 'resolveByProviderId', `Provider ID ${providerId} not found in registry`)
     }
 
     // If forcing creation, skip the search for existing data sets
@@ -462,18 +456,18 @@ export class StorageContext {
   private static async resolveByProviderAddress(
     providerAddress: string,
     warmStorageService: WarmStorageService,
-    providerResolver: ProviderResolver,
+    spRegistry: SPRegistryService,
     signerAddress: string,
     requestedMetadata: Record<string, string>,
     forceCreateDataSet?: boolean
   ): Promise<ProviderSelectionResult> {
     // Get provider by address
-    const provider = await providerResolver.getApprovedProviderByAddress(providerAddress)
+    const provider = await spRegistry.getProviderByAddress(providerAddress)
     if (provider == null) {
       throw createError(
         'StorageContext',
         'resolveByProviderAddress',
-        `Provider ${providerAddress} is not currently approved`
+        `Provider ${providerAddress} not found in registry`
       )
     }
 
@@ -483,7 +477,7 @@ export class StorageContext {
       provider.id,
       requestedMetadata,
       warmStorageService,
-      providerResolver,
+      spRegistry,
       forceCreateDataSet
     )
   }
@@ -496,7 +490,7 @@ export class StorageContext {
     signerAddress: string,
     requestedMetadata: Record<string, string>,
     warmStorageService: WarmStorageService,
-    providerResolver: ProviderResolver,
+    spRegistry: SPRegistryService,
     excludeProviderIds?: number[],
     forceCreateDataSet?: boolean,
     withIpni?: boolean,
@@ -528,7 +522,7 @@ export class StorageContext {
 
         // First, yield providers from existing data sets (in sorted order)
         for (const dataSet of sorted) {
-          const provider = await providerResolver.getApprovedProvider(dataSet.providerId)
+          const provider = await spRegistry.getProvider(dataSet.providerId)
 
           if (provider == null) {
             console.warn(
@@ -576,8 +570,11 @@ export class StorageContext {
       }
     }
 
-    // No existing data sets - select from all approved providers
-    const allProviders = (await providerResolver.getApprovedProviders()).filter(
+    // No existing data sets - select from all approved providers. First we get approved IDs from
+    // WarmStorage, then fetch provider details.
+    const approvedIds = await warmStorageService.getApprovedProviderIds()
+    const approvedProviders = await spRegistry.getProviders(approvedIds)
+    const allProviders = approvedProviders.filter(
       (provider: ProviderInfo) => excludeProviderIds?.includes(provider.id) !== true
     )
 
@@ -1004,17 +1001,68 @@ export class StorageContext {
   }
 
   /**
-   * Get the list of piece CIDs for this service service's data set by querying the PDP server.
+   * Get the list of piece CIDs for this service service's data set.
    * @returns Array of piece CIDs as PieceCID objects
+   * @deprecated Use getPieces() generator for better memory efficiency with large data sets
    */
   async getDataSetPieces(): Promise<PieceCID[]> {
     if (this.dataSetId == null) {
       return []
     }
-    const dataSetData = await this._pdpServer.getDataSet(this.dataSetId)
-    return dataSetData.pieces.map((piece) => piece.pieceCid)
+
+    const pieces: PieceCID[] = []
+    for await (const { pieceCid } of this.getPieces()) {
+      pieces.push(pieceCid)
+    }
+    return pieces
   }
 
+  /**
+   * Get all active pieces for this data set as an async generator.
+   * This provides lazy evaluation and better memory efficiency for large data sets.
+   * @param options - Optional configuration object
+   * @param options.batchSize - The batch size for each pagination call (default: 100)
+   * @param options.signal - Optional AbortSignal to cancel the operation
+   * @yields Object with pieceCid and pieceId - the piece ID is needed for certain operations like deletion
+   */
+  async *getPieces(options?: {
+    batchSize?: number
+    signal?: AbortSignal
+  }): AsyncGenerator<{ pieceCid: PieceCID; pieceId: number }> {
+    if (this._dataSetId == null) {
+      return
+    }
+    const pdpVerifierAddress = this._warmStorageService.getPDPVerifierAddress()
+    const pdpVerifier = new PDPVerifier(this._synapse.getProvider(), pdpVerifierAddress)
+
+    const batchSize = options?.batchSize ?? 100
+    const signal = options?.signal
+    let offset = 0
+    let hasMore = true
+
+    while (hasMore) {
+      if (signal?.aborted) {
+        throw createError('StorageContext', 'getPieces', 'Operation aborted')
+      }
+
+      const result = await pdpVerifier.getActivePieces(this._dataSetId, { offset, limit: batchSize, signal })
+
+      // Yield pieces one by one for lazy evaluation
+      for (let i = 0; i < result.pieces.length; i++) {
+        if (signal?.aborted) {
+          throw createError('StorageContext', 'getPieces', 'Operation aborted')
+        }
+
+        yield {
+          pieceCid: result.pieces[i].pieceCid,
+          pieceId: result.pieces[i].pieceId,
+        }
+      }
+
+      hasMore = result.hasMore
+      offset += batchSize
+    }
+  }
   private async _getPieceIdByCID(pieceCID: string | PieceCID): Promise<number> {
     if (this.dataSetId == null) {
       throw createError('StorageContext', 'getPieceIdByCID', 'Data set not found')
