@@ -67,9 +67,6 @@ export interface SynapseOptions {
   disableNonceManager?: boolean
   /** Override Warm Storage service contract address (defaults to network's default) */
   warmStorageAddress?: string
-  /** Override PDPVerifier contract address (defaults to network's default) */
-  pdpVerifierAddress?: string
-
   // Subgraph Integration (provide ONE of these options)
   /** Optional override for default subgraph service, to enable subgraph-based retrieval. */
   subgraphService?: SubgraphRetrievalService
@@ -303,6 +300,36 @@ export interface StorageContextCallbacks {
   onDataSetResolved?: (info: { isExisting: boolean; dataSetId: number; provider: ProviderInfo }) => void
 }
 
+export interface CreateContextsOptions {
+  /** Number of contexts to create (optional, defaults to 2) */
+  count?: number
+  /**
+   * Specific data set IDs to use
+   */
+  dataSetIds?: number[]
+  /**
+   * Specific provider IDs to use
+   */
+  providerIds?: number[]
+  /** Do not select any of these providers */
+  excludeProviderIds?: number[]
+  /** Whether to enable CDN services */
+  withCDN?: boolean
+  withIpni?: boolean
+  dev?: boolean
+  /**
+   * Custom metadata for the data sets (key-value pairs)
+   * When smart-selecting data sets, this metadata will be used to match.
+   */
+  metadata?: Record<string, string>
+  /** Create new data sets, even if candidates exist */
+  forceCreateDataSets?: boolean
+  /** Callbacks for creation process (will need to change to handle multiples) */
+  callbacks?: StorageContextCallbacks
+  /** Maximum number of uploads to process in a single batch (default: 32, minimum: 1) */
+  uploadBatchSize?: number
+}
+
 /**
  * Options for creating or selecting a storage context
  *
@@ -465,6 +492,8 @@ export interface StorageInfo {
 
   /** Current user allowances (null if wallet not connected) */
   allowances: {
+    /** Whether the service operator is approved to act on behalf of the wallet */
+    isApproved: boolean
     /** Service contract address */
     service: string
     /** Maximum payment rate per epoch allowed */
@@ -536,8 +565,6 @@ export interface ProviderSelectionResult {
   provider: ProviderInfo
   /** Selected data set ID */
   dataSetId: number
-  /** Whether this is a new data set that was created */
-  isNewDataSet?: boolean
   /** Whether this is an existing data set */
   isExisting?: boolean
   /** Data set metadata */
